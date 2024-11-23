@@ -22,6 +22,20 @@ cd shuttleapps
 go run .\cli\main.go
 ```
 
+##### Run it with automatic recompilation when any Rust files are changed
+```sh
+cd shuttleapps
+air init
+```
+It will create a toml file, open it and change the cmd to
+```
+cmd = "go build -o ./tmp/main.exe ./cli/main.go"
+```
+Then type this in command prompt
+```
+air
+```
+
 ## Usage
 Base URL = http://:8080
 
