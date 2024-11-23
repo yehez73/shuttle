@@ -22,7 +22,7 @@ cd shuttleapps
 go run .\cli\main.go
 ```
 
-##### Run it with automatic recompilation when any Rust files are changed
+##### Run it with automatic recompilation when any Project files are changed
 ```sh
 cd shuttleapps
 air init
