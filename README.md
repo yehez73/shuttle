@@ -1,7 +1,7 @@
 # REST API For Shuttle System
 
 [WIP]
-This project is an API built using Golang programming language with fiber framework.
+This project is an REST API built using Golang programming language and Fiber framework.
 
 ## Installation
 
@@ -32,7 +32,7 @@ cd shuttleapps
 go run .\databases\seeders\seeders.go
 ```
 
-It will created dummy user for starting access
+It will create a dummy user for starting access
 
 ### Then
 
