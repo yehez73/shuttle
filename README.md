@@ -27,7 +27,7 @@ go run .\cli\main.go
 cd shuttleapps
 air init
 ```
-It will create a toml file, open it and change the cmd to
+It will create a toml file, open it and change:
 ```
 cmd = "go build -o ./tmp/main.exe ./cli/main.go"
 ```
