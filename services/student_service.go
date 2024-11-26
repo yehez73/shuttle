@@ -69,7 +69,7 @@ func GetAllPermitedSchoolStudentsWithParents(schoolID primitive.ObjectID) ([]mod
 	return schoolStudents, nil
 }
 
-func AddPermittedSchoolStudentWithParents(student models.SchoolStudentRequest, schoolID primitive.ObjectID) error {
+func AddPermittedSchoolStudentWithParents(student models.SchoolStudentRequest, schoolID primitive.ObjectID, username string) error {
 	client, err := database.MongoConnection()
 	if err != nil {
 		log.Print(err)
@@ -80,7 +80,7 @@ func AddPermittedSchoolStudentWithParents(student models.SchoolStudentRequest, s
 		return errors.New("parent data is required")
 	}
 
-	if student.Parent.ParentDetails.Phone == "" || student.Parent.ParentDetails.Address == "" || student.Parent.Email == "" {
+	if student.Parent.Phone == "" || student.Parent.Address == "" || student.Parent.Email == "" {
 		return errors.New("parent details and email are required")
 	}
 
@@ -97,13 +97,11 @@ func AddPermittedSchoolStudentWithParents(student models.SchoolStudentRequest, s
 		parentUser := student.Parent
 		parentUser.Role = models.Parent
 
-		parentUser.ParentDetails = &models.ParentDetails{
+		parentUser.Details = &models.ParentDetails{
 			Children: []primitive.ObjectID{},
-			Phone:    parentUser.ParentDetails.Phone,
-			Address:  parentUser.ParentDetails.Address,
 		}
 
-		parentID, err = AddUser(parentUser)
+		parentID, err = AddUser(parentUser, username)
 		if err != nil {
 			log.Print(err)
 			return err
@@ -211,10 +209,10 @@ func UpdatePermittedSchoolStudentWithParents(id string, student models.SchoolStu
             "first_name": student.Parent.FirstName,
             "last_name":  student.Parent.LastName,
             "email":      student.Parent.Email,
-            "parent_details": bson.M{
+			"phone":    student.Parent.Phone,
+            "address":  student.Parent.Address,
+            "details": bson.M{
                 "children": []primitive.ObjectID{objectID},
-                "phone":    student.Parent.ParentDetails.Phone,
-                "address":  student.Parent.ParentDetails.Address,
             },
         }
 
@@ -286,7 +284,7 @@ func DeletePermittedSchoolStudentWithParents(id string, schoolID primitive.Objec
 	}
 
 	// If the children array is empty, delete the parent
-	if len(parent.ParentDetails.Children) == 0 {
+	if len(parent.Details.(models.ParentDetails).Children) == 0 {
 		_, err = parentCollection.DeleteOne(context.Background(), bson.M{"_id": student.ParentID})
 		if err != nil {
 			log.Print("Error in deleting parent: ", err)
@@ -317,11 +315,12 @@ func CheckPermittedSchoolAccess(userID string) (primitive.ObjectID, error) {
 		return primitive.NilObjectID, errors.New("user not found")
 	}
 
-	if user.SchoolAdminDetails == nil {
+	schoolAdminDetails, ok := user.Details.(models.SchoolAdminDetails)
+	if !ok || schoolAdminDetails == (models.SchoolAdminDetails{}) {
 		return primitive.NilObjectID, errors.New("user is not a school admin")
 	}
 
-	return user.SchoolAdminDetails.SchoolID, nil
+	return user.Details.(models.SchoolAdminDetails).SchoolID, nil
 }
 
 func CheckStudentAvailability(studentID primitive.ObjectID, schoolID primitive.ObjectID) error {

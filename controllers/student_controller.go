@@ -39,6 +39,11 @@ func AddSchoolStudentWithParents(c *fiber.Ctx) error {
 		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid token", nil)
 	}
 
+	username, err := utils.GetUsernameFromToken(token)
+	if err != nil {
+		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid token", nil)
+	}
+
 	SchoolID, err := services.CheckPermittedSchoolAccess(UserID)
 	if err != nil {
 		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "You don't have permission to access this resource", nil)
@@ -56,7 +61,7 @@ func AddSchoolStudentWithParents(c *fiber.Ctx) error {
 		}
 	}
 
-	if err := services.AddPermittedSchoolStudentWithParents(*student, SchoolID); err != nil {
+	if err := services.AddPermittedSchoolStudentWithParents(*student, SchoolID, username); err != nil {
 		return utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to create student: "+err.Error(), nil)
 	}
 

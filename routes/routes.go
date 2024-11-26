@@ -25,6 +25,7 @@ func Route(r *fiber.App) {
 	protectedSA.Use(middleware.SuperAdminMiddleware())
 
 	protectedSA.Get("/user/all", controllers.GetAllUser)
+
 	protectedSA.Get("/user/:id", controllers.GetSpecUser)
 	protectedSA.Post("/user/add", controllers.AddUser)
 	protectedSA.Put("/user/update/:id", controllers.UpdateUser)

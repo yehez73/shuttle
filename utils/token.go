@@ -39,11 +39,12 @@ func init() {
 }
 
 // Signed Access Token
-func GenerateToken(userId, name, role string) (string, error) {
+func GenerateToken(userId, name, role, role_code string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"userId": userId,
 		"name":   name,
 		"role":   role,
+		"role_code": role_code,
 		"exp":    time.Now().Add(time.Hour * 2).Unix(), // 2 hours expiration
 	})
 
@@ -61,11 +62,12 @@ func GenerateToken(userId, name, role string) (string, error) {
 }
 
 // Same, but with 15 days expiration time and for reissuing access token
-func GenerateRefreshToken(userId, name, role string) (string, error) {
+func GenerateRefreshToken(userId, name, role, role_code string) (string, error) {
 	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"userId": userId,
 		"name":   name,
 		"role":   role,
+		"role_code": role_code,
 		"exp":    time.Now().Add(time.Hour * 24 * 15).Unix(), // 15 days expiration
 	})
 
@@ -167,6 +169,56 @@ func SaveRefreshToken(userId, refreshToken string) error {
 }
 
 func GetUserIDFromToken(encryptedToken string) (string, error) {
+    decryptedToken, err := decryptToken(encryptedToken)
+    if err != nil {
+        return "", err
+    }
+
+    token, err := jwt.Parse(decryptedToken, func(token *jwt.Token) (interface{}, error) {
+        return jwtSecret, nil
+    })
+
+    if err != nil {
+        return "", err
+    }
+
+    if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+        userID, ok := claims["userId"].(string)
+        if !ok {
+            return "", errors.New("invalid token")
+        }
+        return userID, nil
+    }
+
+    return "", errors.New("invalid token")
+}
+
+func GetRoleCodeFromToken(encryptedToken string) (string, error) {
+    decryptedToken, err := decryptToken(encryptedToken)
+    if err != nil {
+        return "", err
+    }
+
+    token, err := jwt.Parse(decryptedToken, func(token *jwt.Token) (interface{}, error) {
+        return jwtSecret, nil
+    })
+
+    if err != nil {
+        return "", err
+    }
+
+    if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+        roleCode, ok := claims["role_code"].(string)
+        if !ok {
+            return "", errors.New("invalid token")
+        }
+        return roleCode, nil
+    }
+
+    return "", errors.New("invalid token")
+}
+
+func GetUsernameFromToken(encryptedToken string) (string, error) {
 	decryptedToken, err := decryptToken(encryptedToken)
 	if err != nil {
 		return "", err
@@ -176,10 +228,19 @@ func GetUserIDFromToken(encryptedToken string) (string, error) {
 		return jwtSecret, nil
 	})
 
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		return claims["userId"].(string), nil
+	if err != nil {
+		return "", err
 	}
-	return "", err
+
+	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
+		username, ok := claims["name"].(string)
+		if !ok {
+			return "", errors.New("invalid token")
+		}
+		return username, nil
+	}
+
+	return "", errors.New("invalid token")
 }
 
 var InvalidTokens = make(map[string]struct{})

@@ -2,19 +2,39 @@ package utils
 
 import (
 	"log"
-	"sync"
 	"shuttle/services"
+	"sync"
+	"time"
 
 	"github.com/gofiber/contrib/websocket"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 var (
-	activeConnections = make(map[string]*websocket.Conn) // menyimpan koneksi aktif
-	mutex             = &sync.Mutex{}                     // memastikan akses ke activeConnections aman
+	activeConnections = make(map[string]*websocket.Conn) // Save active WebSocket connections
+	mutex             = &sync.Mutex{}                     // Ensure atomic operations
 )
 
-// Handle koneksi WebSocket dan update status online/offline
+func AddConnection(userID string, conn *websocket.Conn) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	activeConnections[userID] = conn
+}
+
+func RemoveConnection(userID string) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	delete(activeConnections, userID)
+}
+
+func GetConnection(userID string) (*websocket.Conn, bool) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	conn, exists := activeConnections[userID]
+	return conn, exists
+}
+
+// Handle WebSocket connection
 func HandleWebSocketConnection(c *websocket.Conn) {
 	userID := c.Params("id")
 
@@ -24,35 +44,28 @@ func HandleWebSocketConnection(c *websocket.Conn) {
 		return
 	}
 
-	// Lock untuk memastikan data tidak konflik
-	mutex.Lock()
-	defer mutex.Unlock()
-
-	// Menangani koneksi baru untuk user yang terhubung
-	if existingConn, exists := activeConnections[userID]; exists {
-		// Jika ada koneksi lama, tutup koneksi sebelumnya
+	// Ensure only one connection per user
+	if existingConn, exists := GetConnection(userID); exists {
 		log.Println("Closing previous connection for user:", userID)
 		existingConn.Close()
 	}
 
-	// Simpan koneksi baru
-	activeConnections[userID] = c
+	AddConnection(userID, c)
 	log.Println("User connected:", userID)
 
-	// Update status online di database
-	err = services.UpdateUserStatus(ObjectID, "online")
+	err = services.UpdateUserStatus(ObjectID, "online", time.Time{})
 	if err != nil {
 		log.Println("Error updating user status:", err)
 	}
 
-	// Kirim pesan selamat datang
+	// Optional message to client
 	err = c.WriteMessage(websocket.TextMessage, []byte("Hello from server!"))
 	if err != nil {
 		log.Println("Error sending message:", err)
 		return
 	}
 
-	// Terima pesan dari client dan kirim kembali (echo)
+	// Loop to read and write messages
 	for {
 		mt, msg, err := c.ReadMessage()
 		if err != nil {
@@ -62,7 +75,6 @@ func HandleWebSocketConnection(c *websocket.Conn) {
 
 		log.Printf("Received message: %s", msg)
 
-		// Kirim kembali pesan ke client
 		err = c.WriteMessage(mt, msg)
 		if err != nil {
 			log.Println("Error sending response:", err)
@@ -70,12 +82,11 @@ func HandleWebSocketConnection(c *websocket.Conn) {
 		}
 	}
 
-	// Menghapus koneksi ketika WebSocket ditutup
-	delete(activeConnections, userID)
+	// Disconnect user
+	RemoveConnection(userID)
 	log.Println("User disconnected:", userID)
 
-	// Update status offline di database
-	err = services.UpdateUserStatus(ObjectID, "offline")
+	err = services.UpdateUserStatus(ObjectID, "offline", time.Now())
 	if err != nil {
 		log.Println("Error updating user status:", err)
 	}

@@ -33,7 +33,7 @@ func main() {
 	routes.Route(app)
 	database.MongoConnection()
 
-	if err := app.Listen("192.168.110.85:8080"); err != nil {
+	if err := app.Listen("192.168.110.84:8080"); err != nil {
         panic(err)
     }
 	// if err := app.Listen(":8080"); err != nil {
