@@ -1,12 +1,14 @@
 package controllers
 
 import (
+	"log"
 	"shuttle/models"
 	"shuttle/services"
 	"shuttle/utils"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func Login(c *fiber.Ctx) error {
@@ -23,13 +25,13 @@ func Login(c *fiber.Ctx) error {
 	Fullname := user.FirstName + " " + user.LastName
 
 	// Access token (short expiration)
-	accessToken, err := utils.GenerateToken(user.ID.Hex(), Fullname, string(user.Role))
+	accessToken, err := utils.GenerateToken(user.ID.Hex(), Fullname, string(user.Role), user.RoleCode)
 	if err != nil {
 		return utils.InternalServerErrorResponse(c, "Failed to generate access token", nil)
 	}
 
 	// Refresh token (long expiration)
-	refreshToken, err := utils.GenerateRefreshToken(user.ID.Hex(), Fullname, string(user.Role))
+	refreshToken, err := utils.GenerateRefreshToken(user.ID.Hex(), Fullname, string(user.Role), user.RoleCode)
 	if err != nil {
 		return utils.InternalServerErrorResponse(c, "Failed to generate refresh token", nil)
 	}
@@ -54,9 +56,37 @@ func Logout(c *fiber.Ctx) error {
 		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Token missing", nil)
 	}
 
+	UserID, err := utils.GetUserIDFromToken(token)
+	if err != nil {
+		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid token", nil)
+	}
+
+	// Delete WebSocket connection if exists
+	conn, exists := utils.GetConnection(UserID)
+	if exists {
+		conn.Close()
+		utils.RemoveConnection(UserID)
+		log.Println("User disconnected from WebSocket:", UserID)
+	}
+
+	err = services.DeleteRefreshTokenOnLogout(UserID)
+	if err != nil {
+		log.Println("Error deleting refresh token:", err)
+	}
+
 	utils.InvalidateToken(token)
 
-	return utils.SuccessResponse(c, "User logged out successfully", nil)
+	ObjectID, err := primitive.ObjectIDFromHex(UserID)
+	if err != nil {
+		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Error updating user status", nil)
+	}
+
+	err = services.UpdateUserStatus(ObjectID, "offline", time.Now())
+	if err != nil {
+		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Error updating user status", nil)
+	}
+
+	return utils.SuccessResponse(c, "User logged out successfully", map[string]interface{}{})
 }
 
 func GetMyProfile(c *fiber.Ctx) error {
@@ -65,8 +95,12 @@ func GetMyProfile(c *fiber.Ctx) error {
 	if err != nil {
 		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid token", nil)
 	}
+	RoleCode, err := utils.GetRoleCodeFromToken(token)
+	if err != nil {
+		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid token", nil)
+	}
 
-	user, err := services.GetMyProfile(UserID)
+	user, err := services.GetMyProfile(UserID, RoleCode)
 	if err != nil {
 		return utils.ErrorResponse(c, fiber.StatusNotFound, "User not found", nil)
 	}
@@ -105,9 +139,10 @@ func RefreshToken(c *fiber.Ctx) error {
 	userId := claims["userId"].(string)
 	name := claims["name"].(string)
 	role := claims["role"].(string)
+	role_code := claims["role_code"].(string)
 
 	// Generate new access token
-	accessToken, err := utils.GenerateToken(userId, name, role)
+	accessToken, err := utils.GenerateToken(userId, name, role, role_code)
 	if err != nil {
 		return utils.InternalServerErrorResponse(c, "Failed to generate access token", nil)
 	}

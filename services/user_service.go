@@ -6,6 +6,7 @@ import (
 	"log"
 	"shuttle/databases"
 	"shuttle/models"
+	"time"
 
 	"github.com/spf13/viper"
 	"go.mongodb.org/mongo-driver/bson"
@@ -71,7 +72,7 @@ func GetSpecUser(id string) (models.User, error) {
 	return user, nil
 }
 
-func AddUser(user models.User) (primitive.ObjectID, error) {
+func AddUser(user models.User, username string) (primitive.ObjectID, error) {
     client, err := database.MongoConnection()
     if err != nil {
         log.Print(err)
@@ -80,45 +81,81 @@ func AddUser(user models.User) (primitive.ObjectID, error) {
 
     collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
 
+    // Validate common fields
     if err := validateCommonFields(user); err != nil {
         return primitive.NilObjectID, err
     }
 
+    // Hash password if provided
     if user.Password != "" {
-		hashedPassword, err := hashPassword(user.Password)
-		if err != nil {
-			return primitive.NilObjectID, err
-		}
-		user.Password = hashedPassword
-	}	
+        hashedPassword, err := hashPassword(user.Password)
+        if err != nil {
+            return primitive.NilObjectID, err
+        }
+        user.Password = hashedPassword
+    }
 
-	// Different roles require different details
+	user.CreatedAt = time.Now()
+	user.CreatedBy = username
+	user.Status = "offline"
+
+    // Handle role-specific logic
     switch user.Role {
     case models.SuperAdmin:
-        if user.SuperAdminDetails == nil {
-            return primitive.NilObjectID, errors.New("super admin details are required for super admin role")
-        }
-		user.RoleCode = "SA"
+        user.RoleCode = "SA"
     case models.SchoolAdmin:
-        if user.SchoolAdminDetails == nil {
-            return primitive.NilObjectID, errors.New("school admin details are required for school admin role")
+        if user.Details == nil {
+            return primitive.NilObjectID, errors.New("SchoolAdmin details are required")
         }
-        SchoolID := user.SchoolAdminDetails.SchoolID
-        _, err := GetSpecSchool(SchoolID.Hex())
+
+        schoolAdminDetails, ok := user.Details.(map[string]interface{})
+        if !ok {
+            return primitive.NilObjectID, errors.New("invalid details format for SchoolAdmin")
+        }
+
+        schoolID, ok := schoolAdminDetails["school_id"].(string)
+        if !ok {
+            return primitive.NilObjectID, errors.New("school_id is required for SchoolAdmin")
+        }
+
+        schoolObjectID, err := primitive.ObjectIDFromHex(schoolID)
+        if err != nil {
+            return primitive.NilObjectID, errors.New("invalid school_id format")
+        }
+
+        user.Details = models.SchoolAdminDetails{SchoolID: schoolObjectID}
+
+        _, err = GetSpecSchool(schoolObjectID.Hex())
         if err != nil {
             return primitive.NilObjectID, errors.New("school not found")
         }
-		user.RoleCode = "AS"
+        user.RoleCode = "AS"
     case models.Parent:
-        if user.ParentDetails == nil {
-            return primitive.NilObjectID, errors.New("parent details are required for parent role")
-        }
-		user.RoleCode = "P"
+        user.RoleCode = "P"
     case models.Driver:
-        if user.DriverDetails == nil {
-            return primitive.NilObjectID, errors.New("driver details are required for driver role")
-        }
-		user.RoleCode = "D"
+		if user.Details == nil {
+			return primitive.NilObjectID, errors.New("driver details are required")
+		}
+
+		driverDetails, ok := user.Details.(map[string]interface{})
+		if !ok {
+			return primitive.NilObjectID, errors.New("invalid details format for Driver")
+		}
+
+		vehicleID, ok := driverDetails["vehicle_id"].(string)
+		if !ok {
+			return primitive.NilObjectID, errors.New("vehicle_id is required for Driver")
+		}
+
+		vehicleObjectID, err := primitive.ObjectIDFromHex(vehicleID)
+		if err != nil {
+			return primitive.NilObjectID, errors.New("invalid vehicle_id format")
+		}
+
+		user.Details = models.DriverDetails{VehicleID: vehicleObjectID}
+        user.RoleCode = "D"
+    default:
+        return primitive.NilObjectID, errors.New("invalid role specified")
     }
 
     result, err := collection.InsertOne(context.Background(), user)
@@ -129,7 +166,7 @@ func AddUser(user models.User) (primitive.ObjectID, error) {
     return result.InsertedID.(primitive.ObjectID), nil
 }
 
-func UpdateUser(id string, user models.User) error {
+func UpdateUser(id string, user models.User, username string, file []byte) error {
     client, err := database.MongoConnection()
     if err != nil {
         log.Print(err)
@@ -143,22 +180,23 @@ func UpdateUser(id string, user models.User) error {
     }
 
     var existingUser models.User
-	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&existingUser)
-	if err != nil {
-		return errors.New("user not found")
-	}
+    err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&existingUser)
+    if err != nil {
+        return errors.New("user not found")
+    }
+
 
     if err := validateCommonFields(user); err != nil {
         return err
     }
 
     if user.Password != "" {
-		hashedPassword, err := hashPassword(user.Password)
-		if err != nil {
-			return err
-		}
-		user.Password = hashedPassword
-	}
+        hashedPassword, err := hashPassword(user.Password)
+        if err != nil {
+            return err
+        }
+        user.Password = hashedPassword
+    }
 
     updateFields := bson.M{
         "first_name": user.FirstName,
@@ -166,38 +204,82 @@ func UpdateUser(id string, user models.User) error {
         "email":      user.Email,
         "password":   user.Password,
         "role":       user.Role,
+		"phone":      user.Phone,
+		"address":    user.Address,
+		"updated_at": time.Now(),
+		"updated_by": username,
     }
 
-	// Different roles require different details
+    // Handle details field based on user role
     switch user.Role {
-    case models.SuperAdmin:
-        if user.SuperAdminDetails == nil {
-            return errors.New("super admin details are required for super admin role")
-        }
-        updateFields["super_admin_details"] = user.SuperAdminDetails
+	case models.SuperAdmin:
+        user.RoleCode = "SA"
     case models.SchoolAdmin:
-        if user.SchoolAdminDetails == nil {
-            return errors.New("school admin details are required for school admin role")
-        }
-		SchoolID := user.SchoolAdminDetails.SchoolID
-		_, err := GetSpecSchool(SchoolID.Hex())
+		if user.Details == nil {
+			return errors.New("SchoolAdmin details are required")
+		}
+	
+		schoolAdminDetails, ok := user.Details.(map[string]interface{})
+		if !ok {
+			return errors.New("invalid details format for SchoolAdmin")
+		}
+	
+		schoolID, ok := schoolAdminDetails["school_id"].(string)
+		if !ok {
+			return errors.New("school_id is required for SchoolAdmin")
+		}
+	
+		schoolObjectID, err := primitive.ObjectIDFromHex(schoolID)
+		if err != nil {
+			return errors.New("invalid school_id format")
+		}
+	
+		user.Details = models.SchoolAdminDetails{SchoolID: schoolObjectID}
+	
+		_, err = GetSpecSchool(schoolObjectID.Hex())
 		if err != nil {
 			return errors.New("school not found")
 		}
-        updateFields["school_admin_details"] = user.SchoolAdminDetails
+	
+		updateFields["details"] = models.SchoolAdminDetails{SchoolID: schoolObjectID}	
     case models.Parent:
-        if user.ParentDetails == nil {
-            return errors.New("parent details are required for parent role")
+        if user.Details == nil {
+            return errors.New("parent details are required")
         }
-        updateFields["parent_details"] = user.ParentDetails
+        parentDetails, ok := user.Details.(models.ParentDetails)
+        if !ok {
+            return errors.New("invalid details format for Parent")
+        }
+        updateFields["details"] = parentDetails
     case models.Driver:
-        if user.DriverDetails == nil {
-            return errors.New("driver details are required for driver role")
+        if user.Details == nil {
+            return errors.New("driver details are required")
         }
-        updateFields["driver_details"] = user.DriverDetails
+        driverDetails, ok := user.Details.(models.DriverDetails)
+        if !ok {
+            return errors.New("invalid details format for Driver")
+        }
+
+        // Validate the vehicle ID in DriverDetails
+        vehicleID := driverDetails.VehicleID
+        if vehicleID.IsZero() {
+            return errors.New("invalid vehicle_id format for Driver")
+        }
+
+        // Update the 'details' field directly
+        updateFields["details"] = driverDetails
+    default:
+        return errors.New("invalid role specified")
     }
-    _, err = collection.UpdateOne(context.Background(),bson.M{"_id": objectID},bson.M{"$set": updateFields})
-	return err
+
+    // Perform the update in the database
+    _, err = collection.UpdateOne(
+        context.Background(),
+        bson.M{"_id": objectID},
+        bson.M{"$set": updateFields},
+    )
+
+    return err
 }
 
 func validateCommonFields(user models.User) error {
@@ -247,7 +329,7 @@ func DeleteUser(id string) error {
 	return nil
 }
 
-func UpdateUserStatus(userID primitive.ObjectID, status string) error {
+func UpdateUserStatus(userID primitive.ObjectID, status string, lastActive time.Time) error {
 	client, err := database.MongoConnection()
 	if err != nil {
 		log.Print(err)
@@ -256,7 +338,14 @@ func UpdateUserStatus(userID primitive.ObjectID, status string) error {
 
 	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
 
-	_, err = collection.UpdateOne(context.Background(), bson.M{"_id": userID}, bson.M{"$set": bson.M{"status": status}})
+	update := bson.M{
+		"$set": bson.M{
+			"status":      status,
+			"last_active": lastActive,
+		},
+	}
+
+	_, err = collection.UpdateOne(context.Background(), bson.M{"_id": userID}, update)
 	if err != nil {
 		log.Print(err)
 		return err
