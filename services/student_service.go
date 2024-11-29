@@ -2,9 +2,9 @@ package services
 
 import (
 	"context"
-	"errors"
 	"log"
 
+	"shuttle/errors"
 	"shuttle/databases"
 	"shuttle/models"
 
@@ -77,11 +77,11 @@ func AddPermittedSchoolStudentWithParents(student models.SchoolStudentRequest, s
 	}
 
 	if (models.User{}) == student.Parent {
-		return errors.New("parent data is required")
+		return errors.New("parent data is required", 400)
 	}
 
 	if student.Parent.Phone == "" || student.Parent.Address == "" || student.Parent.Email == "" {
-		return errors.New("parent details and email are required")
+		return errors.New("parent details and email are required", 400)
 	}
 
 	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
@@ -130,7 +130,7 @@ func AddPermittedSchoolStudentWithParents(student models.SchoolStudentRequest, s
 	_, err = collection.UpdateOne(
 		context.Background(),
 		bson.M{"_id": parentID},
-		bson.M{"$push": bson.M{"parent_details.children": studentID}},
+		bson.M{"$push": bson.M{"details.children_id": studentID}},
 	)
 	if err != nil {
 		log.Print(err)
@@ -186,7 +186,7 @@ func UpdatePermittedSchoolStudentWithParents(id string, student models.SchoolStu
     }
 
     if (models.User{}) == existingStudent.Parent {
-        return errors.New("parent not found")
+        return errors.New("parent not found", 404)
     }
 
     updateStudent := bson.M{
@@ -302,9 +302,10 @@ func CheckPermittedSchoolAccess(userID string) (primitive.ObjectID, error) {
 		log.Print(err)
 		return primitive.NilObjectID, err
 	}
+
 	objectID, err := primitive.ObjectIDFromHex(userID)
 	if err != nil {
-		return primitive.NilObjectID, errors.New("invalid user id")
+		return primitive.NilObjectID, errors.New("invalid user id", 400)
 	}
 
 	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
@@ -312,15 +313,20 @@ func CheckPermittedSchoolAccess(userID string) (primitive.ObjectID, error) {
 	var user models.User
 	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
 	if err != nil {
-		return primitive.NilObjectID, errors.New("user not found")
+		return primitive.NilObjectID, errors.New("user not found", 404)
 	}
 
-	schoolAdminDetails, ok := user.Details.(models.SchoolAdminDetails)
-	if !ok || schoolAdminDetails == (models.SchoolAdminDetails{}) {
-		return primitive.NilObjectID, errors.New("user is not a school admin")
+	var schoolAdminDetails models.SchoolAdminDetails
+	detailsBytes, err := bson.Marshal(user.Details)
+	if err != nil {
+		return primitive.NilObjectID, err
+	}
+	err = bson.Unmarshal(detailsBytes, &schoolAdminDetails)
+	if err != nil || schoolAdminDetails.SchoolID.IsZero() {
+		return primitive.NilObjectID, errors.New("user details are not in the correct format or school_id is missing", 400)
 	}
 
-	return user.Details.(models.SchoolAdminDetails).SchoolID, nil
+	return schoolAdminDetails.SchoolID, nil
 }
 
 func CheckStudentAvailability(studentID primitive.ObjectID, schoolID primitive.ObjectID) error {
@@ -336,7 +342,7 @@ func CheckStudentAvailability(studentID primitive.ObjectID, schoolID primitive.O
     err = collection.FindOne(context.Background(), bson.M{"_id": studentID, "school_id": schoolID}).Decode(&student)
     if err != nil {
         if err == mongo.ErrNoDocuments {
-            return errors.New("this student is not available in this school")
+            return errors.New("this student is not available in this school", 404)
 		}
         log.Print(err)
         return err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"path/filepath"
 	"time"
 
 	"shuttle/databases"
@@ -63,81 +64,65 @@ func DeleteRefreshTokenOnLogout(userID string) error {
 }
 
 func GetMyProfile(userID string, roleCode string) (interface{}, error) {
-	log.Printf("Fetching profile for userID: %s", userID)
+    user, err := GetSpecUser(userID)
+    if err != nil {
+        log.Print(err)
+        return nil, err
+    }
 
-	client, err := database.MongoConnection()
-	if err != nil {
-		log.Print(err)
-		return nil, err
-	}
+    imageURL := GenerateImageURL(user.Picture)
+    user.Picture = imageURL
 
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+    result, err := getUserByRoleCode(user, roleCode)
+    if err != nil {
+        log.Print(err)
+        return nil, err
+    }
 
-	var user models.UserResponse
-	objectID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		log.Printf("Invalid userID: %s", userID)
-		return nil, err
-	}
+    return result, nil
+}
 
-	log.Printf("Searching for user with ObjectID: %s", objectID.Hex())
+func GenerateImageURL(imagePath string) string {
+    fileName := filepath.Base(imagePath)
+    allowedExtensions := []string{".jpg", ".jpeg", ".png"}
+    
+    ext := filepath.Ext(fileName)
+    if !contains(allowedExtensions, ext) {
+        return ""
+    }
 
-	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
-	if err != nil {
-		log.Printf("Error finding user: %v", err)
-		return nil, errors.New("user not found")
-	}
+    baseURL := "http://" + viper.GetString("BASE_URL") + "/assets/images/"
+    return baseURL + fileName
+}
 
-	log.Printf("User found: %+v", user)
-	log.Printf("User  Details Type: %T", user.Details)
-	log.Printf("User  Details Content: %+v", user.Details)
+func contains(slice []string, item string) bool {
+    for _, s := range slice {
+        if s == item {
+            return true
+        }
+    }
+    return false
+}
 
-	// Switch case to return user based on role code
-	switch roleCode {
+func getUserByRoleCode(user models.User, roleCode string) (interface{}, error) {
+    switch roleCode {
 	case "SA":
-		return models.UserResponse{
-			ID:        user.ID,
-			FirstName: user.FirstName,
-			LastName:  user.LastName,
-			Email:     user.Email,
-			Role:      user.Role,
-			RoleCode:  user.RoleCode,
-			Phone:     user.Phone,
-			Address:   user.Address,
-			Status:    user.Status,
-			CreatedAt: user.CreatedAt,
-			CreatedBy: user.CreatedBy,
-			UpdatedAt: user.UpdatedAt,
-			UpdatedBy: user.UpdatedBy,
-		}, nil
+		return user, nil
 	case "AS":
 		if details, ok := user.Details.(primitive.D); ok {
 			detailsMap := make(map[string]interface{})
 			for _, elem := range details {
 				detailsMap[elem.Key] = elem.Value
 			}
-			return models.UserResponse{
-				ID:        user.ID,
-				FirstName: user.FirstName,
-				LastName:  user.LastName,
-				Email:     user.Email,
-				Role:      user.Role,
-				RoleCode:  user.RoleCode,
-				Phone:     user.Phone,
-				Address:   user.Address,
-				Status:    user.Status,
-				Details:   detailsMap,
-				CreatedAt: user.CreatedAt,
-				CreatedBy: user.CreatedBy,
-				UpdatedAt: user.UpdatedAt,
-				UpdatedBy: user.UpdatedBy,
-			}, nil
+			user.Details = detailsMap
+			
+			return user, nil
 		} else {
 			return nil, errors.New("school admin details are missing or invalid")
 		}
 	case "P":
 		if details, ok := user.Details.(models.ParentDetails); ok {
-			return models.User{
+			return models.UserResponse{
 				ID:        user.ID,
 				FirstName: user.FirstName,
 				LastName:  user.LastName,
@@ -155,21 +140,14 @@ func GetMyProfile(userID string, roleCode string) (interface{}, error) {
 			return nil, errors.New("parent details are missing or invalid")
 		}
 	case "D":
-		if details, ok := user.Details.(models.DriverDetails); ok {
-			return models.User{
-				ID:        user.ID,
-				FirstName: user.FirstName,
-				LastName:  user.LastName,
-				Email:     user.Email,
-				Role:      user.Role,
-				RoleCode:  user.RoleCode,
-				Status:    user.Status,
-				Details:   details,
-				CreatedAt: user.CreatedAt,
-				CreatedBy: user.CreatedBy,
-				UpdatedAt: user.UpdatedAt,
-				UpdatedBy: user.UpdatedBy,
-			}, nil
+		if details, ok := user.Details.(primitive.D); ok {
+			detailsMap := map[string]interface{}{}
+			for _, elem := range details {
+				detailsMap[elem.Key] = elem.Value
+			}
+			user.Details = detailsMap
+
+			return user, nil
 		} else {
 			return nil, errors.New("driver details are missing or invalid")
 		}

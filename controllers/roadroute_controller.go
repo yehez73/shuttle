@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"net/http"
 	"shuttle/models"
 	"shuttle/services"
 	"shuttle/utils"
@@ -11,15 +10,14 @@ import (
 )
 
 func AddRoadRoute(c *fiber.Ctx) error {
-	token := string(c.Request().Header.Peek("Authorization"))
-	UserID, err := utils.GetUserIDFromToken(token)
-	if err != nil {
-		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid token", nil)
+	UserID, ok := c.Locals("userId").(string)
+	if !ok || UserID == "" {
+		return utils.UnauthorizedResponse(c, "Invalid Token", nil)
 	}
 
 	SchoolID, err := services.CheckPermittedSchoolAccess(UserID)
 	if err != nil {
-		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "You don't have permission to access this resource", nil)
+		return utils.UnauthorizedResponse(c, "You are not permitted to access this school", nil)
 	}
 
 	route := new(models.RoadRoute)
@@ -35,7 +33,7 @@ func AddRoadRoute(c *fiber.Ctx) error {
 	}
 
 	if err := services.AddRoadRoute(*route, SchoolID); err != nil {
-		return utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to create route: "+err.Error(), nil)
+		return utils.InternalServerErrorResponse(c, "Failed to add route", nil)
 	}
 
 	return utils.SuccessResponse(c, "Route created successfully", nil)

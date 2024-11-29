@@ -2,10 +2,12 @@ package services
 
 import (
 	"context"
-	"errors"
 	"log"
+	"net/mail"
 	"shuttle/databases"
 	"shuttle/models"
+	"shuttle/errors"
+	"strings"
 	"time"
 
 	"github.com/spf13/viper"
@@ -13,18 +15,18 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-func GetAllUser() ([]models.User, error) {
+func GetAllSuperAdmin() ([]models.UserResponse, error) {
 	client, err := database.MongoConnection()
 	if err != nil {
 		log.Print(err)
 		return nil, err
 	}
 
-	var users []models.User
+	var users []models.UserResponse
 
 	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
 
-	cursor, err := collection.Find(context.Background(), bson.M{})
+	cursor, err := collection.Find(context.Background(), bson.M{"role": models.SuperAdmin})
 	if err != nil {
 		log.Print(err)
 		return nil, err
@@ -32,7 +34,7 @@ func GetAllUser() ([]models.User, error) {
 	defer cursor.Close(context.Background())
 
 	for cursor.Next(context.Background()) {
-		var user models.User
+		var user models.UserResponse
 		if err := cursor.Decode(&user); err != nil {
 			log.Print(err)
 			return nil, err
@@ -46,6 +48,257 @@ func GetAllUser() ([]models.User, error) {
 	}
 
 	return users, nil
+}
+
+func GetSpecSuperAdmin(id string) (models.UserResponse, error) {
+	client, err := database.MongoConnection()
+	if err != nil {
+		log.Print(err)
+		return models.UserResponse{}, err
+	}
+
+	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+	var user models.UserResponse
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return user, err
+	}
+
+	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
+	if err != nil {
+		log.Print(err)
+		return models.UserResponse{}, err
+	}
+
+	return user, nil
+}
+
+func GetAllSchoolAdmin() ([]models.UserResponse, error) {
+	client, err := database.MongoConnection()
+	if err != nil {
+		log.Print(err)
+		return nil, err
+	}
+
+	var users []models.UserResponse
+
+	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+	cursor, err := collection.Find(context.Background(), bson.M{"role": models.SchoolAdmin})
+	if err != nil {
+		log.Print(err)
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	for cursor.Next(context.Background()) {
+		var user models.UserResponse
+		if err := cursor.Decode(&user); err != nil {
+			log.Print(err)
+			return nil, err
+		}
+		if details, ok := user.Details.(primitive.D); ok {
+			detailsMap := make(map[string]interface{})
+			for _, elem := range details {
+				detailsMap[elem.Key] = elem.Value
+			}
+			user.Details = detailsMap
+		}
+		users = append(users, user)
+	}
+
+	if err := cursor.Err(); err != nil {
+		log.Print(err)
+		return nil, err
+	}
+
+	return users, nil
+}
+
+func GetSpecSchoolAdmin(id string) (models.UserResponse, error) {
+	client, err := database.MongoConnection()
+	if err != nil {
+		log.Print(err)
+		return models.UserResponse{}, err
+	}
+
+	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+	var user models.UserResponse
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return user, err
+	}
+
+	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
+	if err != nil {
+		log.Print(err)
+		return models.UserResponse{}, err
+	}
+
+	if details, ok := user.Details.(primitive.D); ok {
+		detailsMap := make(map[string]interface{})
+		for _, elem := range details {
+			detailsMap[elem.Key] = elem.Value
+		}
+		user.Details = detailsMap
+	}
+
+	return user, nil
+}
+
+func GetAllDriverFromAllSchools() ([]models.UserResponse, error) {
+    client, err := database.MongoConnection()
+    if err != nil {
+        log.Print(err)
+        return nil, err
+    }
+
+    var users []models.UserResponse
+    collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+    cursor, err := collection.Find(context.Background(), bson.M{"role": models.Driver})
+    if err != nil {
+        log.Print(err)
+        return nil, err
+    }
+    defer cursor.Close(context.Background())
+
+    for cursor.Next(context.Background()) {
+        var user models.UserResponse
+        if err := cursor.Decode(&user); err != nil {
+            log.Print(err)
+            return nil, err
+        }
+        if details, ok := user.Details.(primitive.D); ok {
+            detailsMap := make(map[string]interface{})
+            for _, elem := range details {
+                detailsMap[elem.Key] = elem.Value
+            }
+            user.Details = detailsMap
+        }
+        users = append(users, user)
+    }
+
+    if err := cursor.Err(); err != nil {
+        log.Print(err)
+        return nil, err
+    }
+
+    return users, nil
+}
+
+func GetAllDriverForSchool(schoolID primitive.ObjectID) ([]models.UserResponse, error) {
+	client, err := database.MongoConnection()
+	if err != nil {
+		log.Print(err)
+		return nil, err
+	}
+
+	var users []models.UserResponse
+	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+	cursor, err := collection.Find(context.Background(), bson.M{
+		"role_code": "D",
+		"details.school_id": schoolID,
+	})
+	if err != nil {
+		log.Print(err)
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	for cursor.Next(context.Background()) {
+		var user models.UserResponse
+		if err := cursor.Decode(&user); err != nil {
+			log.Print(err)
+			return nil, err
+		}
+		if details, ok := user.Details.(primitive.D); ok {
+			detailsMap := make(map[string]interface{})
+			for _, elem := range details {
+				detailsMap[elem.Key] = elem.Value
+			}
+			user.Details = detailsMap
+		}
+
+		users = append(users, user)
+	}
+
+	if err := cursor.Err(); err != nil {
+		log.Print(err)
+		return nil, err
+	}
+
+	return users, nil
+}
+
+func GetSpecDriverFromAllSchools(id string) (models.UserResponse, error) {
+	client, err := database.MongoConnection()
+	if err != nil {
+		log.Print(err)
+		return models.UserResponse{}, err
+	}
+
+	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+	var user models.UserResponse
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return user, err
+	}
+
+	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
+	if err != nil {
+		log.Print(err)
+		return models.UserResponse{}, err
+	}
+
+	if details, ok := user.Details.(primitive.D); ok {
+		detailsMap := make(map[string]interface{})
+		for _, elem := range details {
+			detailsMap[elem.Key] = elem.Value
+		}
+		user.Details = detailsMap
+	}
+
+	return user, nil
+}
+
+func GetSpecDriverForSchool(id string, schoolID primitive.ObjectID) (models.UserResponse, error) {
+	client, err := database.MongoConnection()
+	if err != nil {
+		log.Print(err)
+		return models.UserResponse{}, err
+	}
+
+	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+	var user models.UserResponse
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return user, err
+	}
+
+	err = collection.FindOne(context.Background(), bson.M{
+		"_id": objectID,
+		"details.school_id": schoolID,
+	}).Decode(&user)
+	if err != nil {
+		log.Print(err)
+		return models.UserResponse{}, err
+	}
+
+	if details, ok := user.Details.(primitive.D); ok {
+		detailsMap := make(map[string]interface{})
+		for _, elem := range details {
+			detailsMap[elem.Key] = elem.Value
+		}
+		user.Details = detailsMap
+	}
+
+	return user, nil
 }
 
 func GetSpecUser(id string) (models.User, error) {
@@ -81,12 +334,10 @@ func AddUser(user models.User, username string) (primitive.ObjectID, error) {
 
     collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
 
-    // Validate common fields
     if err := validateCommonFields(user); err != nil {
         return primitive.NilObjectID, err
     }
 
-    // Hash password if provided
     if user.Password != "" {
         hashedPassword, err := hashPassword(user.Password)
         if err != nil {
@@ -95,67 +346,18 @@ func AddUser(user models.User, username string) (primitive.ObjectID, error) {
         user.Password = hashedPassword
     }
 
-	user.CreatedAt = time.Now()
-	user.CreatedBy = username
-	user.Status = "offline"
+    var existingUser models.User
+    err = collection.FindOne(context.Background(), bson.M{"email": user.Email}).Decode(&existingUser)
+    if err == nil {
+        return primitive.NilObjectID, errors.New("email already exists", 409)
+    }
 
-    // Handle role-specific logic
-    switch user.Role {
-    case models.SuperAdmin:
-        user.RoleCode = "SA"
-    case models.SchoolAdmin:
-        if user.Details == nil {
-            return primitive.NilObjectID, errors.New("SchoolAdmin details are required")
-        }
+    user.CreatedAt = time.Now()
+    user.CreatedBy = username
+    user.Status = "offline"
 
-        schoolAdminDetails, ok := user.Details.(map[string]interface{})
-        if !ok {
-            return primitive.NilObjectID, errors.New("invalid details format for SchoolAdmin")
-        }
-
-        schoolID, ok := schoolAdminDetails["school_id"].(string)
-        if !ok {
-            return primitive.NilObjectID, errors.New("school_id is required for SchoolAdmin")
-        }
-
-        schoolObjectID, err := primitive.ObjectIDFromHex(schoolID)
-        if err != nil {
-            return primitive.NilObjectID, errors.New("invalid school_id format")
-        }
-
-        user.Details = models.SchoolAdminDetails{SchoolID: schoolObjectID}
-
-        _, err = GetSpecSchool(schoolObjectID.Hex())
-        if err != nil {
-            return primitive.NilObjectID, errors.New("school not found")
-        }
-        user.RoleCode = "AS"
-    case models.Parent:
-        user.RoleCode = "P"
-    case models.Driver:
-		if user.Details == nil {
-			return primitive.NilObjectID, errors.New("driver details are required")
-		}
-
-		driverDetails, ok := user.Details.(map[string]interface{})
-		if !ok {
-			return primitive.NilObjectID, errors.New("invalid details format for Driver")
-		}
-
-		vehicleID, ok := driverDetails["vehicle_id"].(string)
-		if !ok {
-			return primitive.NilObjectID, errors.New("vehicle_id is required for Driver")
-		}
-
-		vehicleObjectID, err := primitive.ObjectIDFromHex(vehicleID)
-		if err != nil {
-			return primitive.NilObjectID, errors.New("invalid vehicle_id format")
-		}
-
-		user.Details = models.DriverDetails{VehicleID: vehicleObjectID}
-        user.RoleCode = "D"
-    default:
-        return primitive.NilObjectID, errors.New("invalid role specified")
+    if err := processRoleDetails(&user); err != nil {
+        return primitive.NilObjectID, err
     }
 
     result, err := collection.InsertOne(context.Background(), user)
@@ -179,13 +381,6 @@ func UpdateUser(id string, user models.User, username string, file []byte) error
         return err
     }
 
-    var existingUser models.User
-    err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&existingUser)
-    if err != nil {
-        return errors.New("user not found")
-    }
-
-
     if err := validateCommonFields(user); err != nil {
         return err
     }
@@ -199,8 +394,10 @@ func UpdateUser(id string, user models.User, username string, file []byte) error
     }
 
     updateFields := bson.M{
+		"picture":    user.Picture,
         "first_name": user.FirstName,
         "last_name":  user.LastName,
+		"gender":     user.Gender,
         "email":      user.Email,
         "password":   user.Password,
         "role":       user.Role,
@@ -210,69 +407,12 @@ func UpdateUser(id string, user models.User, username string, file []byte) error
 		"updated_by": username,
     }
 
-    // Handle details field based on user role
-    switch user.Role {
-	case models.SuperAdmin:
-        user.RoleCode = "SA"
-    case models.SchoolAdmin:
-		if user.Details == nil {
-			return errors.New("SchoolAdmin details are required")
-		}
-	
-		schoolAdminDetails, ok := user.Details.(map[string]interface{})
-		if !ok {
-			return errors.New("invalid details format for SchoolAdmin")
-		}
-	
-		schoolID, ok := schoolAdminDetails["school_id"].(string)
-		if !ok {
-			return errors.New("school_id is required for SchoolAdmin")
-		}
-	
-		schoolObjectID, err := primitive.ObjectIDFromHex(schoolID)
-		if err != nil {
-			return errors.New("invalid school_id format")
-		}
-	
-		user.Details = models.SchoolAdminDetails{SchoolID: schoolObjectID}
-	
-		_, err = GetSpecSchool(schoolObjectID.Hex())
-		if err != nil {
-			return errors.New("school not found")
-		}
-	
-		updateFields["details"] = models.SchoolAdminDetails{SchoolID: schoolObjectID}	
-    case models.Parent:
-        if user.Details == nil {
-            return errors.New("parent details are required")
-        }
-        parentDetails, ok := user.Details.(models.ParentDetails)
-        if !ok {
-            return errors.New("invalid details format for Parent")
-        }
-        updateFields["details"] = parentDetails
-    case models.Driver:
-        if user.Details == nil {
-            return errors.New("driver details are required")
-        }
-        driverDetails, ok := user.Details.(models.DriverDetails)
-        if !ok {
-            return errors.New("invalid details format for Driver")
-        }
-
-        // Validate the vehicle ID in DriverDetails
-        vehicleID := driverDetails.VehicleID
-        if vehicleID.IsZero() {
-            return errors.New("invalid vehicle_id format for Driver")
-        }
-
-        // Update the 'details' field directly
-        updateFields["details"] = driverDetails
-    default:
-        return errors.New("invalid role specified")
+    if err := processRoleDetails(&user); err != nil {
+        return err
     }
 
-    // Perform the update in the database
+    updateFields["details"] = user.Details
+
     _, err = collection.UpdateOne(
         context.Background(),
         bson.M{"_id": objectID},
@@ -282,21 +422,112 @@ func UpdateUser(id string, user models.User, username string, file []byte) error
     return err
 }
 
-func validateCommonFields(user models.User) error {
-	if len(user.Password) < 8 {
-		return errors.New("password must be at least 8 characters")
-	}
+func processRoleDetails(user *models.User) error {
+    switch user.Role {
+	case models.SuperAdmin:
+		user.RoleCode = "SA"
+    case models.SchoolAdmin:
+        if user.Details == nil {
+            return errors.New("SchoolAdmin details are required", 400)
+        }
 
-	validRoles := map[models.Role]bool{
-		models.SuperAdmin:  true,
-		models.SchoolAdmin: true,
-		models.Parent:      true,
-		models.Driver:      true,
-	}
-	if !validRoles[user.Role] {
-		return errors.New("invalid role")
-	}
-	return nil
+        schoolAdminDetails, ok := user.Details.(map[string]interface{})
+        if !ok {
+            return errors.New("invalid details format for SchoolAdmin", 400)
+        }
+
+        schoolID, ok := schoolAdminDetails["school_id"].(string)
+        if !ok {
+            return errors.New("school_id is required for SchoolAdmin", 400)
+        }
+
+        schoolObjectID, err := primitive.ObjectIDFromHex(schoolID)
+        if err != nil {
+            return errors.New("invalid school_id format", 400)
+        }
+
+        user.Details = models.SchoolAdminDetails{SchoolID: schoolObjectID}
+        _, err = GetSpecSchool(schoolObjectID.Hex())
+        if err != nil {
+            return errors.New("school not found", 400)
+        }
+		user.RoleCode = "AS"
+    case models.Parent:
+        if user.Details == nil {
+            return errors.New("parent details are required", 400)
+        }
+		user.RoleCode = "P"
+	case models.Driver:
+		if user.Details == nil {
+			return errors.New("driver details are required", 400)
+		}
+	
+		driverDetails, ok := user.Details.(map[string]interface{})
+		if !ok {
+			return errors.New("invalid details format for Driver", 400)
+		}
+	
+		licenseNumber, ok := driverDetails["license_number"].(string)
+		if !ok || len(licenseNumber) == 0 {
+			return errors.New("license number is required for Driver", 400)
+		}
+	
+		vehicleID, ok := driverDetails["vehicle_id"].(string)
+		if !ok {
+			vehicleID = ""
+		}
+	
+		if vehicleID != "" {
+			vehicleObjectID, err := primitive.ObjectIDFromHex(vehicleID)
+			if err != nil {
+				return errors.New("invalid vehicle_id format", 400)
+			}
+			_, err = GetSpecVehicle(vehicleObjectID.Hex())
+			if err != nil {
+				return errors.New("vehicle not found", 400)
+			}
+			driverDetails["vehicle_id"] = vehicleObjectID
+		} else {
+			driverDetails["vehicle_id"] = nil
+		}
+	
+		schoolID, ok := driverDetails["school_id"].(string)
+		if !ok {
+			schoolID = ""
+		}
+	
+		if schoolID != "" {
+			schoolObjectID, err := primitive.ObjectIDFromHex(schoolID)
+			if err != nil {
+				return errors.New("invalid school_id format", 400)
+			}
+			_, err = GetSpecSchool(schoolObjectID.Hex())
+			if err != nil {
+				return errors.New("school not found", 400)
+			}
+			driverDetails["school_id"] = schoolObjectID
+		} else {
+			driverDetails["school_id"] = nil
+		}
+	
+		var vehicleObjectID, schoolObjectID primitive.ObjectID
+		if driverDetails["vehicle_id"] != nil {
+			vehicleObjectID = driverDetails["vehicle_id"].(primitive.ObjectID)
+		}
+		if driverDetails["school_id"] != nil {
+			schoolObjectID = driverDetails["school_id"].(primitive.ObjectID)
+		}
+	
+		user.Details = models.DriverDetails{
+			LicenseNumber: licenseNumber,
+			SchoolID:      schoolObjectID,
+			VehicleID:     vehicleObjectID,
+		}
+		user.RoleCode = "D"	
+    default:
+        return errors.New("invalid role specified", 400)
+    }
+    return nil
 }
 
 func DeleteUser(id string) error {
@@ -318,6 +549,42 @@ func DeleteUser(id string) error {
 	if err != nil {
 		log.Print(err)
 		return err
+	}
+
+	_, err = collection.DeleteOne(context.Background(), bson.M{"_id": objectID})
+	if err != nil {
+		log.Print(err)
+		return err
+	}
+
+	return nil
+}
+
+func DeleteSchoolDriver(id string, schoolID primitive.ObjectID) error {
+	client, err := database.MongoConnection()
+	if err != nil {
+		log.Print(err)
+		return err
+	}
+
+	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return err
+	}
+
+	var user models.User
+	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
+	if err != nil {
+		log.Print(err)
+		return err
+	}
+
+	if details, ok := user.Details.(map[string]interface{}); ok {
+		if details["school_id"].(primitive.ObjectID).Hex() != schoolID.Hex() {
+			return errors.New("driver does not belong to this school", 400)
+		}
 	}
 
 	_, err = collection.DeleteOne(context.Background(), bson.M{"_id": objectID})
@@ -351,5 +618,39 @@ func UpdateUserStatus(userID primitive.ObjectID, status string, lastActive time.
 		return err
 	}
 
+	return nil
+}
+
+func validateCommonFields(user models.User) error {
+	if len(user.Password) < 8 {
+		return errors.New("password must be at least 8 characters", 400)
+	}
+
+	validRoles := map[models.Role]bool{
+		models.SuperAdmin:  true,
+		models.SchoolAdmin: true,
+		models.Parent:      true,
+		models.Driver:      true,
+	}
+	if !validRoles[models.Role(strings.ToLower(string(user.Role)))] {
+		return errors.New("invalid role", 400)
+	}
+
+	validGender := map[models.Gender]bool{
+		models.Female: true,
+		models.Male:   true,
+	}
+	if !validGender[models.Gender(strings.ToLower(string(user.Gender)))] {
+		return errors.New("invalid gender", 400)
+	}
+
+	if len(user.Phone) < 12 || len(user.Phone) > 15 {
+		return errors.New("phone number must be between 12 and 15 characters", 400)
+	}
+
+	_, err := mail.ParseAddress(user.Email)
+	if err != nil {
+		return errors.New("invalid email format", 400)
+	}
 	return nil
 }

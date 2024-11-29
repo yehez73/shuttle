@@ -19,7 +19,7 @@ func Login(c *fiber.Ctx) error {
 
 	user, err := services.Login(loginReq.Email, loginReq.Password)
 	if err != nil {
-		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid email or password", nil)
+		return utils.UnauthorizedResponse(c, "Invalid email or password", nil)
 	}
 
 	Fullname := user.FirstName + " " + user.LastName
@@ -51,14 +51,9 @@ func Login(c *fiber.Ctx) error {
 }
 
 func Logout(c *fiber.Ctx) error {
-	token := c.Get("Authorization")
-	if token == "" {
-		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Token missing", nil)
-	}
-
-	UserID, err := utils.GetUserIDFromToken(token)
-	if err != nil {
-		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid token", nil)
+	UserID, ok := c.Locals("userId").(string)
+	if !ok || UserID == "" {
+		return utils.UnauthorizedResponse(c, "User ID is missing or invalid", nil)
 	}
 
 	// Delete WebSocket connection if exists
@@ -69,40 +64,40 @@ func Logout(c *fiber.Ctx) error {
 		log.Println("User disconnected from WebSocket:", UserID)
 	}
 
-	err = services.DeleteRefreshTokenOnLogout(UserID)
+	err := services.DeleteRefreshTokenOnLogout(UserID)
 	if err != nil {
 		log.Println("Error deleting refresh token:", err)
 	}
 
-	utils.InvalidateToken(token)
+	utils.InvalidateToken(c.Get("Authorization"))
 
 	ObjectID, err := primitive.ObjectIDFromHex(UserID)
 	if err != nil {
-		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Error updating user status", nil)
+		return utils.InternalServerErrorResponse(c, "Error Updating User Status", nil)
 	}
 
 	err = services.UpdateUserStatus(ObjectID, "offline", time.Now())
 	if err != nil {
-		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Error updating user status", nil)
+		return utils.InternalServerErrorResponse(c, "Error Updating User Status", nil)
 	}
 
 	return utils.SuccessResponse(c, "User logged out successfully", map[string]interface{}{})
 }
 
 func GetMyProfile(c *fiber.Ctx) error {
-	token := string(c.Request().Header.Peek("Authorization"))
-	UserID, err := utils.GetUserIDFromToken(token)
-	if err != nil {
-		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid token", nil)
+	UserID, ok := c.Locals("userId").(string)
+	if !ok || UserID == "" {
+		return utils.UnauthorizedResponse(c, "Invalid User ID", nil)
 	}
-	RoleCode, err := utils.GetRoleCodeFromToken(token)
-	if err != nil {
-		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid token", nil)
+	
+	RoleCode, ok := c.Locals("role_code").(string)
+	if !ok || RoleCode == "" {
+		return utils.UnauthorizedResponse(c, "Invalid Role Code", nil)
 	}
 
 	user, err := services.GetMyProfile(UserID, RoleCode)
 	if err != nil {
-		return utils.ErrorResponse(c, fiber.StatusNotFound, "User not found", nil)
+		return utils.NotFoundResponse(c, "User not found", nil)
 	}
 
 	return c.Status(fiber.StatusOK).JSON(user)
@@ -112,28 +107,28 @@ func GetMyProfile(c *fiber.Ctx) error {
 func RefreshToken(c *fiber.Ctx) error {
 	refreshToken := c.Get("Authorization")
 	if refreshToken == "" {
-		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Refresh token missing", nil)
+		return utils.UnauthorizedResponse(c, "Missing refresh token", nil)
 	}
 
 	claims, err := utils.ValidateToken(refreshToken)
 	if err != nil {
-		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Invalid refresh token", nil)
+		return utils.UnauthorizedResponse(c, "Invalid refresh token", nil)
 	}
 
 	userID := claims["userId"].(string)
 
 	storedRefreshToken, err := services.GetStoredRefreshToken(userID)
 	if err != nil {
-		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Refresh token not found or invalid", nil)
+		return utils.InternalServerErrorResponse(c, "Failed to get stored refresh token", nil)
 	}
 
 	if storedRefreshToken != refreshToken {
-		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Refresh token mismatch", nil)
+		return utils.UnauthorizedResponse(c, "Invalid refresh token", nil)
 	}
 
 	expirationTime := time.Unix(int64(claims["exp"].(float64)), 0)
 	if time.Now().After(expirationTime) {
-		return utils.ErrorResponse(c, fiber.StatusUnauthorized, "Refresh token expired", nil)
+		return utils.UnauthorizedResponse(c, "Refresh token has expired", nil)
 	}
 
 	userId := claims["userId"].(string)

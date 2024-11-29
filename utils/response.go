@@ -41,6 +41,26 @@ func BadRequestResponse(c *fiber.Ctx, message string, data interface{}) error {
     })
 }
 
+// Unauthorized Response (Code 401)
+func UnauthorizedResponse(c *fiber.Ctx, message string, data interface{}) error {
+    return c.Status(fiber.StatusUnauthorized).JSON(Response{
+        Code:    fiber.StatusUnauthorized,
+        Message: message,
+        Status:  false,
+        Data:    data,
+    })
+}
+
+// Forbidden Response (Code 403)
+func ForbiddenResponse(c *fiber.Ctx, message string, data interface{}) error {
+    return c.Status(fiber.StatusForbidden).JSON(Response{
+        Code:    fiber.StatusForbidden,
+        Message: message,
+        Status:  false,
+        Data:    data,
+    })
+}
+
 // Not Found Response (Code 404)
 func NotFoundResponse(c *fiber.Ctx, message string, data interface{}) error {
     return c.Status(fiber.StatusNotFound).JSON(Response{

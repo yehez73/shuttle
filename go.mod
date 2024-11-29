@@ -13,8 +13,12 @@ require (
 	golang.org/x/crypto v0.29.0
 )
 
+require golang.org/x/image v0.0.0-20191009234506-e7c1f5e7dbb8 // indirect
+
 require (
 	github.com/andybalholm/brotli v1.1.0 // indirect
+	github.com/badoux/checkmail v1.2.4
+	github.com/disintegration/imaging v1.6.2
 	github.com/fasthttp/websocket v1.5.8 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect

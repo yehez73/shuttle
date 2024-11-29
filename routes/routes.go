@@ -11,46 +11,59 @@ func Route(r *fiber.App) {
 	// FOR PUBLIC
 	r.Post("/login", controllers.Login)
 	r.Post("/refresh-token", controllers.RefreshToken)
+	r.Static("/assets", "./assets")
 
 	// FOR AUTHENTICATED
 	protected := r.Group("/api")
-	protected.Use(middleware.AuthMiddleware())
+	protected.Use(middleware.AuthenticationMiddleware())
+	protected.Use(middleware.AuthorizationMiddleware([]string{"SA", "AS", "D", "P"}))
 
 	protected.Get("/my/profile", controllers.GetMyProfile)
-
 	protected.Post("/logout", controllers.Logout)
 
-	// FOR SUPERADMIN
-	protectedSA := r.Group("/superadmin")
-	protectedSA.Use(middleware.SuperAdminMiddleware())
+	protectedSuperAdmin := protected.Group("/superadmin")
+	protectedSuperAdmin.Use(middleware.AuthorizationMiddleware([]string{"SA"}))
 
-	protectedSA.Get("/user/all", controllers.GetAllUser)
+	protectedSchoolAdmin := protected.Group("/school")
+	protectedSchoolAdmin.Use(middleware.AuthorizationMiddleware([]string{"AS"}))
 
-	protectedSA.Get("/user/:id", controllers.GetSpecUser)
-	protectedSA.Post("/user/add", controllers.AddUser)
-	protectedSA.Put("/user/update/:id", controllers.UpdateUser)
-	protectedSA.Delete("/user/delete/:id", controllers.DeleteUser)
+	// USER
+	protectedSuperAdmin.Get("/user/sa/all", controllers.GetAllSuperAdmin)
+	protectedSuperAdmin.Get("/user/sa/:id", controllers.GetSpecSuperAdmin)
+
+	protectedSuperAdmin.Get("/user/as/all", controllers.GetAllSchoolAdmin)
+	protectedSuperAdmin.Get("/user/as/:id", controllers.GetSpecSchoolAdmin)
+
+	protectedSuperAdmin.Get("/user/driver/all", controllers.GetAllPermittedDriver)
+	protectedSuperAdmin.Get("/user/driver/:id", controllers.GetSpecPermittedDriver)
 	
-	protectedSA.Get("/school/all", controllers.GetAllSchools)
-	protectedSA.Get("/school/:id", controllers.GetSpecSchool)
-	protectedSA.Post("/school/add", controllers.AddSchool)
-	protectedSA.Put("/school/update/:id", controllers.UpdateSchool)
-	protectedSA.Delete("/school/delete/:id", controllers.DeleteSchool)
+	protectedSchoolAdmin.Get("/user/driver/all", controllers.GetAllPermittedDriver)
+	protectedSchoolAdmin.Get("/user/driver/:id", controllers.GetSpecPermittedDriver)
 
-	protectedSA.Get("/vehicle/all", controllers.GetAllVehicles)
-	protectedSA.Get("/vehicle/:id", controllers.GetSpecVehicle)
-	protectedSA.Post("/vehicle/add", controllers.AddVehicle)
-	protectedSA.Put("/vehicle/update/:id", controllers.UpdateVehicle)
-	protectedSA.Delete("/vehicle/delete/:id", controllers.DeleteVehicle)
+	protectedSuperAdmin.Post("/user/add", controllers.AddUser)
+	protectedSchoolAdmin.Post("/user/driver/add", controllers.AddSchoolDriver)
+	
+	protectedSuperAdmin.Put("/user/update/:id", controllers.UpdateUser)
+	protectedSchoolAdmin.Put("/user/driver/update/:id", controllers.UpdateSchoolDriver)
 
-	// FOR SCHOOL ADMIN
-	protectedSchAdmin := r.Group("/admin")
-	protectedSchAdmin.Use(middleware.SchoolAdminMiddleware())
+	protectedSuperAdmin.Delete("/user/delete/:id", controllers.DeleteUser)
+	protectedSchoolAdmin.Delete("/user/driver/delete/:id", controllers.DeleteSchoolDriver)
 
-	protectedSchAdmin.Get("/school/student/all", controllers.GetAllStudentWithParents)
-	protectedSchAdmin.Post("/school/student/add", controllers.AddSchoolStudentWithParents)
-	protectedSchAdmin.Put("/school/student/update/:id", controllers.UpdateSchoolStudentWithParents)
-	protectedSchAdmin.Delete("/school/student/delete/:id", controllers.DeleteSchoolStudentWithParents)
+	// SCHOOL
+	protectedSuperAdmin.Get("/school/all", controllers.GetAllSchools)
+	protectedSuperAdmin.Get("/school/:id", controllers.GetSpecSchool)
+	protectedSuperAdmin.Post("/school/add", controllers.AddSchool)
+	protectedSuperAdmin.Put("/school/update/:id", controllers.UpdateSchool)
+	protectedSuperAdmin.Delete("/school/delete/:id", controllers.DeleteSchool)
 
-	protectedSchAdmin.Post("/school/route/add", controllers.AddRoadRoute)
+	protectedSuperAdmin.Get("/vehicle/all", controllers.GetAllVehicles)
+	protectedSuperAdmin.Get("/vehicle/:id", controllers.GetSpecVehicle)
+	protectedSuperAdmin.Post("/vehicle/add", controllers.AddVehicle)
+	protectedSuperAdmin.Put("/vehicle/update/:id", controllers.UpdateVehicle)
+	protectedSuperAdmin.Delete("/vehicle/delete/:id", controllers.DeleteVehicle)
+
+	protectedSchoolAdmin.Get("/student/all", controllers.GetAllStudentWithParents)
+	protectedSchoolAdmin.Post("/student/add", controllers.AddSchoolStudentWithParents)
+	protectedSchoolAdmin.Put("/student/update/:id", controllers.UpdateSchoolStudentWithParents)
+	protectedSchoolAdmin.Delete("/student/delete/:id", controllers.DeleteSchoolStudentWithParents)
 }

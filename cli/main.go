@@ -9,6 +9,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/spf13/viper"
 )
 
 func main() {
@@ -33,10 +34,7 @@ func main() {
 	routes.Route(app)
 	database.MongoConnection()
 
-	if err := app.Listen("192.168.110.84:8080"); err != nil {
+	if err := app.Listen(viper.GetString("BASE_URL")); err != nil {
         panic(err)
     }
-	// if err := app.Listen(":8080"); err != nil {
-    //     panic(err)
-    // }
 }

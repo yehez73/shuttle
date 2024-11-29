@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"log"
-	"net/http"
 	"shuttle/models"
 	"shuttle/services"
 	"shuttle/utils"
@@ -15,7 +14,7 @@ func GetAllSchools(c *fiber.Ctx) error {
 	schools, err := services.GetAllSchools()
 	if err != nil {
 		log.Print(err)
-		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Internal server error", nil)
+		return utils.InternalServerErrorResponse(c, "Internal server error", nil)
 	}
 
 	return c.Status(fiber.StatusOK).JSON(schools)
@@ -27,7 +26,7 @@ func GetSpecSchool(c *fiber.Ctx) error {
 	school, err := services.GetSpecSchool(id)
 	if err != nil {
 		log.Print(err)
-		return utils.ErrorResponse(c, fiber.StatusInternalServerError, "Internal server error", nil)
+		return utils.InternalServerErrorResponse(c, "Internal server error", nil)
 	}
 
 	return c.Status(fiber.StatusOK).JSON(school)
@@ -47,7 +46,7 @@ func AddSchool(c *fiber.Ctx) error {
 	}	
 
 	if err := services.AddSchool(*school); err != nil {
-		return utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to create school: " + err.Error(), nil)
+		return utils.InternalServerErrorResponse(c, "Failed to create school" + err.Error(), nil)
 	}
 
 	return utils.SuccessResponse(c, "School created successfully", nil)
@@ -68,7 +67,7 @@ func UpdateSchool(c *fiber.Ctx) error {
 	}	
 
 	if err := services.UpdateSchool(id, *school); err != nil {
-		return utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to update school: " + err.Error(), nil)
+		return utils.InternalServerErrorResponse(c, "Failed to update school: " + err.Error(), nil)
 	}
 
 	return utils.SuccessResponse(c, "School updated successfully", nil)
@@ -78,7 +77,7 @@ func DeleteSchool(c *fiber.Ctx) error {
 	id := c.Params("id")
 
 	if err := services.DeleteSchool(id); err != nil {
-		return utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to delete school: " + err.Error(), nil)
+		return utils.InternalServerErrorResponse(c, "Failed to delete school: " + err.Error(), nil)
 	}
 
 	return utils.SuccessResponse(c, "School deleted successfully", nil)

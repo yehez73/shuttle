@@ -45,7 +45,7 @@ func GenerateToken(userId, name, role, role_code string) (string, error) {
 		"name":   name,
 		"role":   role,
 		"role_code": role_code,
-		"exp":    time.Now().Add(time.Hour * 2).Unix(), // 2 hours expiration
+		"exp":    time.Now().Add(time.Hour * 6).Unix(), // 2 hours expiration
 	})
 
 	signedToken, err := token.SignedString(jwtSecret)
@@ -166,81 +166,6 @@ func SaveRefreshToken(userId, refreshToken string) error {
 		ExpiredAt:    expiration,
 	})
 	return err
-}
-
-func GetUserIDFromToken(encryptedToken string) (string, error) {
-    decryptedToken, err := decryptToken(encryptedToken)
-    if err != nil {
-        return "", err
-    }
-
-    token, err := jwt.Parse(decryptedToken, func(token *jwt.Token) (interface{}, error) {
-        return jwtSecret, nil
-    })
-
-    if err != nil {
-        return "", err
-    }
-
-    if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-        userID, ok := claims["userId"].(string)
-        if !ok {
-            return "", errors.New("invalid token")
-        }
-        return userID, nil
-    }
-
-    return "", errors.New("invalid token")
-}
-
-func GetRoleCodeFromToken(encryptedToken string) (string, error) {
-    decryptedToken, err := decryptToken(encryptedToken)
-    if err != nil {
-        return "", err
-    }
-
-    token, err := jwt.Parse(decryptedToken, func(token *jwt.Token) (interface{}, error) {
-        return jwtSecret, nil
-    })
-
-    if err != nil {
-        return "", err
-    }
-
-    if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-        roleCode, ok := claims["role_code"].(string)
-        if !ok {
-            return "", errors.New("invalid token")
-        }
-        return roleCode, nil
-    }
-
-    return "", errors.New("invalid token")
-}
-
-func GetUsernameFromToken(encryptedToken string) (string, error) {
-	decryptedToken, err := decryptToken(encryptedToken)
-	if err != nil {
-		return "", err
-	}
-
-	token, err := jwt.Parse(decryptedToken, func(token *jwt.Token) (interface{}, error) {
-		return jwtSecret, nil
-	})
-
-	if err != nil {
-		return "", err
-	}
-
-	if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-		username, ok := claims["name"].(string)
-		if !ok {
-			return "", errors.New("invalid token")
-		}
-		return username, nil
-	}
-
-	return "", errors.New("invalid token")
 }
 
 var InvalidTokens = make(map[string]struct{})
