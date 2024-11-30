@@ -11,6 +11,7 @@ import (
 	"github.com/disintegration/imaging"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/spf13/viper"
 )
 
 const MaxFileSize = 10 * 1024 * 1024 // 10 MB
@@ -52,13 +53,13 @@ func HandleAssetsOnUpdate(c *fiber.Ctx, existingPicture string) (string, error) 
     if existingPicture != "" {
         err := DeletePicture(existingPicture)
         if err != nil {
-            return "", fmt.Errorf("Failed to delete existing picture: %v", err)
+            return "", err
         }
     }
 
     pictureFileName, err := HandleUploadedFile(c)
     if err != nil {
-        return "", fmt.Errorf("Failed to upload new picture: %v", err)
+        return "", err
     }
 
     return pictureFileName, nil
@@ -78,12 +79,10 @@ func IsValidImageExtension(fileName string) bool {
 func IsValidImageType(fileBytes []byte) bool {
 	img, err := imaging.Decode(bytes.NewReader(fileBytes))
 	if err != nil {
-		fmt.Println("Error decoding image:", err)
 		return false
 	}
 
 	if img == nil {
-		fmt.Println("Invalid image")
 		return false
 	}
 
@@ -133,4 +132,26 @@ func DeletePicture(fileName string) error {
     }
 
     return nil
+}
+
+func GenerateImageAssetsURL(imagePath string) (string, error) {
+	fileName := filepath.Base(imagePath)
+	allowedExtensions := []string{".jpg", ".jpeg", ".png"}
+
+	ext := filepath.Ext(fileName)
+	if !contains(allowedExtensions, ext) {
+		return "", fmt.Errorf("invalid image extension")
+	}
+
+	baseURL := "http://" + viper.GetString("BASE_URL") + "/assets/images/"
+	return baseURL + fileName, nil
+}
+
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }

@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	
-	"log"
 	"shuttle/databases"
 	"shuttle/models"
 
@@ -15,7 +14,6 @@ import (
 func GetAllSchools() ([]models.School, error) {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return nil, err
 	}
 
@@ -25,7 +23,6 @@ func GetAllSchools() ([]models.School, error) {
 
 	cursor, err := collection.Find(context.Background(), bson.M{})
 	if err != nil {
-		log.Print(err)
 		return nil, err
 	}
 	defer cursor.Close(context.Background())
@@ -33,14 +30,13 @@ func GetAllSchools() ([]models.School, error) {
 	for cursor.Next(context.Background()) {
 		var school models.School
 		if err := cursor.Decode(&school); err != nil {
-			log.Print(err)
+
 			return nil, err
 		}
 		schools = append(schools, school)
 	}
 
 	if err := cursor.Err(); err != nil {
-		log.Print(err)
 		return nil, err
 	}
 
@@ -51,7 +47,6 @@ func GetSpecSchool(id string) (models.School, error) {
 	var school models.School
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return school, err
 	}
 

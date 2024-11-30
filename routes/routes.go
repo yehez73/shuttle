@@ -26,6 +26,7 @@ func Route(r *fiber.App) {
 
 	protectedSchoolAdmin := protected.Group("/school")
 	protectedSchoolAdmin.Use(middleware.AuthorizationMiddleware([]string{"AS"}))
+	protectedSchoolAdmin.Use(middleware.SchoolAdminMiddleware())
 
 	// USER
 	protectedSuperAdmin.Get("/user/sa/all", controllers.GetAllSuperAdmin)

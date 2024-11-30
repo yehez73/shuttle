@@ -1,23 +1,22 @@
 package controllers
 
 import (
+	"shuttle/logger"
 	"shuttle/models"
 	"shuttle/services"
 	"shuttle/utils"
 
-	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 func AddRoadRoute(c *fiber.Ctx) error {
-	UserID, ok := c.Locals("userId").(string)
-	if !ok || UserID == "" {
-		return utils.UnauthorizedResponse(c, "Invalid Token", nil)
-	}
-
-	SchoolID, err := services.CheckPermittedSchoolAccess(UserID)
+	SchoolObjID, err := primitive.ObjectIDFromHex(c.Locals("school_id").(string))
 	if err != nil {
-		return utils.UnauthorizedResponse(c, "You are not permitted to access this school", nil)
+		logger.LogError(err, "Failed to convert school id", map[string]interface{}{
+			"school_id": c.Locals("school_id").(string),
+		})
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}
 
 	route := new(models.RoadRoute)
@@ -25,15 +24,15 @@ func AddRoadRoute(c *fiber.Ctx) error {
 		return utils.BadRequestResponse(c, "Invalid request data", nil)
 	}
 
-	validate := validator.New()
-	if err := validate.Struct(route); err != nil {
-		for _, err := range err.(validator.ValidationErrors) {
-			return utils.BadRequestResponse(c, err.Field()+" is "+err.Tag(), nil)
-		}
+	if err := utils.ValidateStruct(c, route); err != nil {
+		return err
 	}
 
-	if err := services.AddRoadRoute(*route, SchoolID); err != nil {
-		return utils.InternalServerErrorResponse(c, "Failed to add route", nil)
+	if err := services.AddRoadRoute(*route, SchoolObjID); err != nil {
+		logger.LogError(err, "Failed to create route", map[string]interface{}{
+			"school_id": SchoolObjID.Hex(),
+		})
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}
 
 	return utils.SuccessResponse(c, "Route created successfully", nil)

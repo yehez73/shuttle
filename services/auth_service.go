@@ -2,13 +2,12 @@ package services
 
 import (
 	"context"
-	"errors"
-	"log"
 	"path/filepath"
 	"time"
 
 	"shuttle/databases"
 	"shuttle/models"
+	"shuttle/errors"
 
 	"github.com/spf13/viper"
 	"go.mongodb.org/mongo-driver/bson"
@@ -19,7 +18,6 @@ import (
 func Login(email, password string) (models.User, error) {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return models.User{}, err
 	}
 
@@ -28,11 +26,11 @@ func Login(email, password string) (models.User, error) {
 	var user models.User
 	err = collection.FindOne(context.Background(), bson.M{"email": email}).Decode(&user)
 	if err != nil {
-		return user, errors.New("user not found")
+		return user, errors.New("user not found", 0)
 	}
 
 	if !validatePassword(password, user.Password) {
-		return user, errors.New("password does not match")
+		return user, errors.New("password does not match", 0)
 	}
 
 	return user, nil
@@ -41,7 +39,6 @@ func Login(email, password string) (models.User, error) {
 func DeleteRefreshTokenOnLogout(userID string) error {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return err
 	}
 
@@ -64,80 +61,87 @@ func DeleteRefreshTokenOnLogout(userID string) error {
 }
 
 func GetMyProfile(userID string, roleCode string) (interface{}, error) {
-    user, err := GetSpecUser(userID)
-    if err != nil {
-        log.Print(err)
-        return nil, err
-    }
+	user, err := GetSpecUser(userID)
+	if err != nil {
+		return nil, err
+	}
 
-    imageURL := GenerateImageURL(user.Picture)
-    user.Picture = imageURL
+	imageURL, err := generateImageURL(user.Picture)
+	if err != nil {
+		return nil, err
+	}
+	user.Picture = imageURL
 
-    result, err := getUserByRoleCode(user, roleCode)
-    if err != nil {
-        log.Print(err)
-        return nil, err
-    }
+	result, err := getUserByRoleCode(user, roleCode)
+	if err != nil {
+		return nil, err
+	}
 
-    return result, nil
+	return result, nil
 }
 
-func GenerateImageURL(imagePath string) string {
-    fileName := filepath.Base(imagePath)
-    allowedExtensions := []string{".jpg", ".jpeg", ".png"}
-    
-    ext := filepath.Ext(fileName)
-    if !contains(allowedExtensions, ext) {
-        return ""
-    }
+func generateImageURL(imagePath string) (string, error) {
+	fileName := filepath.Base(imagePath)
+	allowedExtensions := []string{".jpg", ".jpeg", ".png"}
 
-    baseURL := "http://" + viper.GetString("BASE_URL") + "/assets/images/"
-    return baseURL + fileName
+	ext := filepath.Ext(fileName)
+	if !contains(allowedExtensions, ext) {
+		return "", errors.New("invalid image extension", 0)
+	}
+
+	baseURL := "http://" + viper.GetString("BASE_URL") + "/assets/images/"
+	return baseURL + fileName, nil
 }
 
 func contains(slice []string, item string) bool {
-    for _, s := range slice {
-        if s == item {
-            return true
-        }
-    }
-    return false
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }
 
-func getUserByRoleCode(user models.User, roleCode string) (interface{}, error) {
-    switch roleCode {
+func getUserByRoleCode(user models.User, roleCode string) (models.UserResponse, error) {
+	userResponse := models.UserResponse{
+		ID:        user.ID,
+		Picture:   user.Picture,
+		FirstName: user.FirstName,
+		LastName:  user.LastName,
+		Gender:    user.Gender,
+		Email:     user.Email,
+		Role:      user.Role,
+		RoleCode:  user.RoleCode,
+		Phone:     user.Phone,
+		Address:   user.Address,
+		Status:    user.Status,
+		CreatedAt: user.CreatedAt,
+		CreatedBy: user.CreatedBy,
+		UpdatedAt: user.UpdatedAt,
+		UpdatedBy: user.UpdatedBy,
+	}
+
+	switch roleCode {
 	case "SA":
-		return user, nil
+		userResponse.Details = user.Details
+		return userResponse, nil
 	case "AS":
 		if details, ok := user.Details.(primitive.D); ok {
 			detailsMap := make(map[string]interface{})
 			for _, elem := range details {
 				detailsMap[elem.Key] = elem.Value
 			}
-			user.Details = detailsMap
-			
-			return user, nil
+			userResponse.Details = detailsMap
+			return userResponse, nil
 		} else {
-			return nil, errors.New("school admin details are missing or invalid")
+			return models.UserResponse{}, errors.New("school admin details are missing or invalid", 0)
 		}
 	case "P":
 		if details, ok := user.Details.(models.ParentDetails); ok {
-			return models.UserResponse{
-				ID:        user.ID,
-				FirstName: user.FirstName,
-				LastName:  user.LastName,
-				Email:     user.Email,
-				Role:      user.Role,
-				RoleCode:  user.RoleCode,
-				Status:    user.Status,
-				Details:   details,
-				CreatedAt: user.CreatedAt,
-				CreatedBy: user.CreatedBy,
-				UpdatedAt: user.UpdatedAt,
-				UpdatedBy: user.UpdatedBy,
-			}, nil
+			userResponse.Details = details
+			return userResponse, nil
 		} else {
-			return nil, errors.New("parent details are missing or invalid")
+			return models.UserResponse{}, errors.New("parent details are missing or invalid", 0)
 		}
 	case "D":
 		if details, ok := user.Details.(primitive.D); ok {
@@ -145,14 +149,13 @@ func getUserByRoleCode(user models.User, roleCode string) (interface{}, error) {
 			for _, elem := range details {
 				detailsMap[elem.Key] = elem.Value
 			}
-			user.Details = detailsMap
-
-			return user, nil
+			userResponse.Details = detailsMap
+			return userResponse, nil
 		} else {
-			return nil, errors.New("driver details are missing or invalid")
+			return models.UserResponse{}, errors.New("driver details are missing or invalid", 0)
 		}
 	default:
-		return nil, errors.New("role code not found")
+		return models.UserResponse{}, errors.New("role code not found", 0)
 	}
 }
 
@@ -172,7 +175,6 @@ func validatePassword(providedPassword, storedPassword string) bool {
 func GetStoredRefreshToken(userID string) (string, error) {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return "", err
 	}
 
@@ -187,15 +189,13 @@ func GetStoredRefreshToken(userID string) (string, error) {
 	err = collection.FindOne(context.Background(), bson.M{"user_id": objectID}).Decode(&storedToken)
 	if err != nil {
 		if err.Error() == "mongo: no documents in result" {
-			log.Println("refresh token not found for the user")
-			return "", errors.New("refresh token not found for the user")
+			return "", errors.New("refresh token not found for the user", 0)
 		}
-		log.Print(err)
 		return "", err
 	}
 
 	if time.Now().After(storedToken.ExpiredAt) {
-		return "", errors.New("refresh token has expired")
+		return "", errors.New("refresh token has expired", 0)
 	}
 
 	return storedToken.RefreshToken, nil

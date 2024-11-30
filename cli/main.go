@@ -4,6 +4,7 @@ import (
 	"shuttle/databases"
 	"shuttle/routes"
 	"shuttle/utils"
+	zerolog "shuttle/logger"
 
 	"github.com/gofiber/contrib/websocket"
 	"github.com/gofiber/fiber/v2"
@@ -13,6 +14,8 @@ import (
 )
 
 func main() {
+	zerolog.InitLogger()
+
 	app := fiber.New()
 
 	app.Use(cors.New())

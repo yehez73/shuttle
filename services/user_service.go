@@ -2,7 +2,7 @@ package services
 
 import (
 	"context"
-	"log"
+
 	"net/mail"
 	"shuttle/databases"
 	"shuttle/models"
@@ -18,7 +18,6 @@ import (
 func GetAllSuperAdmin() ([]models.UserResponse, error) {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return nil, err
 	}
 
@@ -28,7 +27,6 @@ func GetAllSuperAdmin() ([]models.UserResponse, error) {
 
 	cursor, err := collection.Find(context.Background(), bson.M{"role": models.SuperAdmin})
 	if err != nil {
-		log.Print(err)
 		return nil, err
 	}
 	defer cursor.Close(context.Background())
@@ -36,14 +34,12 @@ func GetAllSuperAdmin() ([]models.UserResponse, error) {
 	for cursor.Next(context.Background()) {
 		var user models.UserResponse
 		if err := cursor.Decode(&user); err != nil {
-			log.Print(err)
 			return nil, err
 		}
 		users = append(users, user)
 	}
 
 	if err := cursor.Err(); err != nil {
-		log.Print(err)
 		return nil, err
 	}
 
@@ -53,7 +49,6 @@ func GetAllSuperAdmin() ([]models.UserResponse, error) {
 func GetSpecSuperAdmin(id string) (models.UserResponse, error) {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return models.UserResponse{}, err
 	}
 
@@ -67,7 +62,6 @@ func GetSpecSuperAdmin(id string) (models.UserResponse, error) {
 
 	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
 	if err != nil {
-		log.Print(err)
 		return models.UserResponse{}, err
 	}
 
@@ -77,7 +71,6 @@ func GetSpecSuperAdmin(id string) (models.UserResponse, error) {
 func GetAllSchoolAdmin() ([]models.UserResponse, error) {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return nil, err
 	}
 
@@ -87,7 +80,6 @@ func GetAllSchoolAdmin() ([]models.UserResponse, error) {
 
 	cursor, err := collection.Find(context.Background(), bson.M{"role": models.SchoolAdmin})
 	if err != nil {
-		log.Print(err)
 		return nil, err
 	}
 	defer cursor.Close(context.Background())
@@ -95,7 +87,6 @@ func GetAllSchoolAdmin() ([]models.UserResponse, error) {
 	for cursor.Next(context.Background()) {
 		var user models.UserResponse
 		if err := cursor.Decode(&user); err != nil {
-			log.Print(err)
 			return nil, err
 		}
 		if details, ok := user.Details.(primitive.D); ok {
@@ -109,7 +100,6 @@ func GetAllSchoolAdmin() ([]models.UserResponse, error) {
 	}
 
 	if err := cursor.Err(); err != nil {
-		log.Print(err)
 		return nil, err
 	}
 
@@ -119,7 +109,6 @@ func GetAllSchoolAdmin() ([]models.UserResponse, error) {
 func GetSpecSchoolAdmin(id string) (models.UserResponse, error) {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return models.UserResponse{}, err
 	}
 
@@ -133,7 +122,6 @@ func GetSpecSchoolAdmin(id string) (models.UserResponse, error) {
 
 	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
 	if err != nil {
-		log.Print(err)
 		return models.UserResponse{}, err
 	}
 
@@ -151,7 +139,6 @@ func GetSpecSchoolAdmin(id string) (models.UserResponse, error) {
 func GetAllDriverFromAllSchools() ([]models.UserResponse, error) {
     client, err := database.MongoConnection()
     if err != nil {
-        log.Print(err)
         return nil, err
     }
 
@@ -160,7 +147,6 @@ func GetAllDriverFromAllSchools() ([]models.UserResponse, error) {
 
     cursor, err := collection.Find(context.Background(), bson.M{"role": models.Driver})
     if err != nil {
-        log.Print(err)
         return nil, err
     }
     defer cursor.Close(context.Background())
@@ -168,7 +154,6 @@ func GetAllDriverFromAllSchools() ([]models.UserResponse, error) {
     for cursor.Next(context.Background()) {
         var user models.UserResponse
         if err := cursor.Decode(&user); err != nil {
-            log.Print(err)
             return nil, err
         }
         if details, ok := user.Details.(primitive.D); ok {
@@ -182,17 +167,15 @@ func GetAllDriverFromAllSchools() ([]models.UserResponse, error) {
     }
 
     if err := cursor.Err(); err != nil {
-        log.Print(err)
         return nil, err
     }
 
     return users, nil
 }
 
-func GetAllDriverForSchool(schoolID primitive.ObjectID) ([]models.UserResponse, error) {
+func GetAllDriverForPermittedSchool(schoolID primitive.ObjectID) ([]models.UserResponse, error) {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return nil, err
 	}
 
@@ -204,7 +187,6 @@ func GetAllDriverForSchool(schoolID primitive.ObjectID) ([]models.UserResponse, 
 		"details.school_id": schoolID,
 	})
 	if err != nil {
-		log.Print(err)
 		return nil, err
 	}
 	defer cursor.Close(context.Background())
@@ -212,7 +194,6 @@ func GetAllDriverForSchool(schoolID primitive.ObjectID) ([]models.UserResponse, 
 	for cursor.Next(context.Background()) {
 		var user models.UserResponse
 		if err := cursor.Decode(&user); err != nil {
-			log.Print(err)
 			return nil, err
 		}
 		if details, ok := user.Details.(primitive.D); ok {
@@ -227,7 +208,6 @@ func GetAllDriverForSchool(schoolID primitive.ObjectID) ([]models.UserResponse, 
 	}
 
 	if err := cursor.Err(); err != nil {
-		log.Print(err)
 		return nil, err
 	}
 
@@ -237,7 +217,6 @@ func GetAllDriverForSchool(schoolID primitive.ObjectID) ([]models.UserResponse, 
 func GetSpecDriverFromAllSchools(id string) (models.UserResponse, error) {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return models.UserResponse{}, err
 	}
 
@@ -251,7 +230,6 @@ func GetSpecDriverFromAllSchools(id string) (models.UserResponse, error) {
 
 	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
 	if err != nil {
-		log.Print(err)
 		return models.UserResponse{}, err
 	}
 
@@ -266,10 +244,9 @@ func GetSpecDriverFromAllSchools(id string) (models.UserResponse, error) {
 	return user, nil
 }
 
-func GetSpecDriverForSchool(id string, schoolID primitive.ObjectID) (models.UserResponse, error) {
+func GetSpecDriverForPermittedSchool(id string, schoolID primitive.ObjectID) (models.UserResponse, error) {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return models.UserResponse{}, err
 	}
 
@@ -286,7 +263,6 @@ func GetSpecDriverForSchool(id string, schoolID primitive.ObjectID) (models.User
 		"details.school_id": schoolID,
 	}).Decode(&user)
 	if err != nil {
-		log.Print(err)
 		return models.UserResponse{}, err
 	}
 
@@ -304,7 +280,6 @@ func GetSpecDriverForSchool(id string, schoolID primitive.ObjectID) (models.User
 func GetSpecUser(id string) (models.User, error) {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return models.User{}, err
 	}
 
@@ -318,7 +293,6 @@ func GetSpecUser(id string) (models.User, error) {
 
 	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
 	if err != nil {
-		log.Print(err)
 		return models.User{}, err
 	}
 
@@ -328,7 +302,6 @@ func GetSpecUser(id string) (models.User, error) {
 func AddUser(user models.User, username string) (primitive.ObjectID, error) {
     client, err := database.MongoConnection()
     if err != nil {
-        log.Print(err)
         return primitive.NilObjectID, err
     }
 
@@ -371,7 +344,6 @@ func AddUser(user models.User, username string) (primitive.ObjectID, error) {
 func UpdateUser(id string, user models.User, username string, file []byte) error {
     client, err := database.MongoConnection()
     if err != nil {
-        log.Print(err)
         return err
     }
 
@@ -533,7 +505,6 @@ func processRoleDetails(user *models.User) error {
 func DeleteUser(id string) error {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return err
 	}
 
@@ -547,13 +518,11 @@ func DeleteUser(id string) error {
 	var user models.User
 	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
 	if err != nil {
-		log.Print(err)
 		return err
 	}
 
 	_, err = collection.DeleteOne(context.Background(), bson.M{"_id": objectID})
 	if err != nil {
-		log.Print(err)
 		return err
 	}
 
@@ -563,7 +532,6 @@ func DeleteUser(id string) error {
 func DeleteSchoolDriver(id string, schoolID primitive.ObjectID) error {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return err
 	}
 
@@ -577,7 +545,6 @@ func DeleteSchoolDriver(id string, schoolID primitive.ObjectID) error {
 	var user models.User
 	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
 	if err != nil {
-		log.Print(err)
 		return err
 	}
 
@@ -589,7 +556,6 @@ func DeleteSchoolDriver(id string, schoolID primitive.ObjectID) error {
 
 	_, err = collection.DeleteOne(context.Background(), bson.M{"_id": objectID})
 	if err != nil {
-		log.Print(err)
 		return err
 	}
 
@@ -599,7 +565,6 @@ func DeleteSchoolDriver(id string, schoolID primitive.ObjectID) error {
 func UpdateUserStatus(userID primitive.ObjectID, status string, lastActive time.Time) error {
 	client, err := database.MongoConnection()
 	if err != nil {
-		log.Print(err)
 		return err
 	}
 
@@ -614,7 +579,6 @@ func UpdateUserStatus(userID primitive.ObjectID, status string, lastActive time.
 
 	_, err = collection.UpdateOne(context.Background(), bson.M{"_id": userID}, update)
 	if err != nil {
-		log.Print(err)
 		return err
 	}
 
