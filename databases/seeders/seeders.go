@@ -22,6 +22,7 @@ type User struct {
 	Email    string             `json:"email" bson:"email"`
 	Password string             `json:"password" bson:"password"`
 	Role     Role               `json:"role" bson:"role"`
+	RoleCode string             `json:"role_code" bson:"role_code"`
 }
 
 func main() {
@@ -61,6 +62,7 @@ func main() {
 			Email:    "faker@gmail.com",
 			Password: hashedPassword,
 			Role:     SuperAdmin,
+			RoleCode: "SA",
 		},
 	}
 

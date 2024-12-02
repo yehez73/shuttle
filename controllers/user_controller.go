@@ -322,7 +322,6 @@ func parseFormData(c *fiber.Ctx, existingUser *models.User) (*models.User, error
     user.FirstName = c.FormValue("first_name", existingUser.FirstName)
     user.LastName = c.FormValue("last_name", existingUser.LastName)
 	user.Email = c.FormValue("email", existingUser.Email)
-    user.Password = c.FormValue("password", existingUser.Password)
 	
     genderStr := c.FormValue("gender", string(existingUser.Gender))
     gender, err := models.ParseGender(genderStr)

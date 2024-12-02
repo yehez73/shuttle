@@ -67,4 +67,8 @@ func Route(r *fiber.App) {
 	protectedSchoolAdmin.Post("/student/add", controllers.AddSchoolStudentWithParents)
 	protectedSchoolAdmin.Put("/student/update/:id", controllers.UpdateSchoolStudentWithParents)
 	protectedSchoolAdmin.Delete("/student/delete/:id", controllers.DeleteSchoolStudentWithParents)
+
+	protectedSchoolAdmin.Get("/route/all", controllers.GetAllRoutes)
+	protectedSchoolAdmin.Get("/route/:id", controllers.GetSpecRoute)
+	protectedSchoolAdmin.Post("/route/add", controllers.AddRoute)
 }

@@ -47,18 +47,19 @@ func ParseRole(roleStr string) (Role, error) {
 }
 
 type User struct {
-	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	Picture   string             `json:"picture" bson:"picture"`
-	FirstName string             `json:"first_name" bson:"first_name" validate:"required"`
-	LastName  string             `json:"last_name" bson:"last_name" validate:"required"`
-	Gender    Gender             `json:"gender" bson:"gender" validate:"required"`
-	Email     string             `json:"email" bson:"email" validate:"required"`
-	Password  string             `json:"password" bson:"password" validate:"required"`
-	Role      Role               `json:"role" bson:"role" validate:"required"`
-	RoleCode  string             `json:"role_code" bson:"role_code"`
-	Phone     string             `json:"phone" bson:"phone" validate:"required"`
-	Address   string             `json:"address" bson:"address" validate:"required"`
-	Status    string             `json:"status" bson:"status"`
+	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	Picture    string             `json:"picture" bson:"picture"`
+	FirstName  string             `json:"first_name" bson:"first_name" validate:"required"`
+	LastName   string             `json:"last_name" bson:"last_name" validate:"required"`
+	Gender     Gender             `json:"gender" bson:"gender" validate:"required"`
+	Email      string             `json:"email" bson:"email" validate:"required"`
+	Password   string             `json:"password" bson:"password" validate:"required"`
+	Role       Role               `json:"role" bson:"role" validate:"required"`
+	RoleCode   string             `json:"role_code" bson:"role_code"`
+	Phone      string             `json:"phone" bson:"phone" validate:"required"`
+	Address    string             `json:"address" bson:"address" validate:"required"`
+	Status     string             `json:"status" bson:"status"`
+	LastActive time.Time          `json:"last_active" bson:"last_active"`
 
 	Details interface{} `json:"details" bson:"details"`
 
@@ -83,17 +84,18 @@ type DriverDetails struct {
 }
 
 type UserResponse struct {
-	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
-	Picture   string             `json:"picture" bson:"picture"`
-	FirstName string             `json:"first_name" bson:"first_name" validate:"required"`
-	LastName  string             `json:"last_name" bson:"last_name" validate:"required"`
-	Gender    Gender             `json:"gender" bson:"gender" validate:"required"`
-	Email     string             `json:"email" bson:"email" validate:"required,email"`
-	Role      Role               `json:"role" bson:"role" validate:"required"`
-	RoleCode  string             `json:"role_code" bson:"role_code"`
-	Phone     string             `json:"phone" bson:"phone" validate:"required"`
-	Address   string             `json:"address" bson:"address" validate:"required"`
-	Status    string             `json:"status" bson:"status"`
+	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	Picture    string             `json:"picture" bson:"picture"`
+	FirstName  string             `json:"first_name" bson:"first_name" validate:"required"`
+	LastName   string             `json:"last_name" bson:"last_name" validate:"required"`
+	Gender     Gender             `json:"gender" bson:"gender" validate:"required"`
+	Email      string             `json:"email" bson:"email" validate:"required,email"`
+	Role       Role               `json:"role" bson:"role" validate:"required"`
+	RoleCode   string             `json:"role_code" bson:"role_code"`
+	Phone      string             `json:"phone" bson:"phone" validate:"required"`
+	Address    string             `json:"address" bson:"address" validate:"required"`
+	Status     string             `json:"status" bson:"status"`
+	LastActive time.Time          `json:"last_active" bson:"last_active"`
 
 	Details interface{} `json:"details" bson:"details,omitempty"`
 

@@ -8,13 +8,14 @@ type Student struct {
 	ID        primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	FirstName string             `json:"first_name" bson:"first_name" validate:"required"`
 	LastName  string             `json:"last_name" bson:"last_name" validate:"required"`
+	Class     string             `json:"class" bson:"class" validate:"required"`
 	ParentID  primitive.ObjectID `json:"parent_id" bson:"parent_id"`
 	SchoolID  primitive.ObjectID `json:"school_id" bson:"school_id"`
 }
 
 type SchoolStudentRequest struct {
-	Student `json:"student"`
-	Parent User `json:"parent"`
+	Student `json:"student" validate:"required"`
+	Parent  User `json:"parent" validate:"required"`
 }
 
 type SchoolStudentParentResponse struct {

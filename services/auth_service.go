@@ -66,11 +66,13 @@ func GetMyProfile(userID string, roleCode string) (interface{}, error) {
 		return nil, err
 	}
 
-	imageURL, err := generateImageURL(user.Picture)
-	if err != nil {
-		return nil, err
+	if user.Picture != "" {
+		imageURL, err := generateImageURL(user.Picture)
+		if err != nil {
+			return nil, err
+		}
+		user.Picture = imageURL
 	}
-	user.Picture = imageURL
 
 	result, err := getUserByRoleCode(user, roleCode)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"shuttle/logger"
 
 	"github.com/disintegration/imaging"
 	"github.com/gofiber/fiber/v2"
@@ -28,13 +29,15 @@ func HandleUploadedFile(c *fiber.Ctx) (string, error) {
 
 	src, err := file.Open()
 	if err != nil {
-		return "", ErrorResponse(c, http.StatusInternalServerError, "Failed to open image file", nil)
+		logger.LogError(err, "Failed to open file", nil)
+		return "", ErrorResponse(c, http.StatusInternalServerError, "Something went wrong, please try again later", nil)
 	}
 	defer src.Close()
 
 	fileBytes, err := io.ReadAll(src)
 	if err != nil {
-		return "", ErrorResponse(c, http.StatusInternalServerError, "Failed to read image file", nil)
+		logger.LogError(err, "Failed to read file", nil)
+		return "", ErrorResponse(c, http.StatusInternalServerError, "Something went wrong, please try again later", nil)
 	}
 
 	if !IsValidImageType(fileBytes) {
@@ -43,7 +46,8 @@ func HandleUploadedFile(c *fiber.Ctx) (string, error) {
 
 	pictureFileName, err := SavePicture(fileBytes, file.Filename)
 	if err != nil {
-		return "", ErrorResponse(c, http.StatusInternalServerError, "Failed to save picture", nil)
+		logger.LogError(err, "Failed to save picture", nil)
+		return "", ErrorResponse(c, http.StatusInternalServerError, "Something went wrong, please try again later", nil)
 	}
 
 	return pictureFileName, nil

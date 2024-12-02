@@ -1,7 +1,8 @@
 package utils
 
 import (
-	"log"
+	"encoding/json"
+	"shuttle/logger"
 	"shuttle/services"
 	"sync"
 	"time"
@@ -15,53 +16,58 @@ var (
 	mutex             = &sync.Mutex{}                     // Ensure atomic operations
 )
 
-func AddConnection(userID string, conn *websocket.Conn) {
+func AddConnection(ID string, conn *websocket.Conn) {
 	mutex.Lock()
 	defer mutex.Unlock()
-	activeConnections[userID] = conn
+	activeConnections[ID] = conn
 }
 
-func RemoveConnection(userID string) {
+func RemoveConnection(ID string) {
 	mutex.Lock()
 	defer mutex.Unlock()
-	delete(activeConnections, userID)
+	delete(activeConnections, ID)
 }
 
-func GetConnection(userID string) (*websocket.Conn, bool) {
+func GetConnection(ID string) (*websocket.Conn, bool) {
 	mutex.Lock()
 	defer mutex.Unlock()
-	conn, exists := activeConnections[userID]
+	conn, exists := activeConnections[ID]
 	return conn, exists
 }
 
 // Handle WebSocket connection
 func HandleWebSocketConnection(c *websocket.Conn) {
-	userID := c.Params("id")
+	ID := c.Params("id")
 
-	ObjectID, err := primitive.ObjectIDFromHex(userID)
+	_, err := services.GetSpecUser(ID)
 	if err != nil {
-		log.Println("Invalid user ID:", err)
+		logger.LogError(err, "Websocket Error Getting User", map[string]interface{}{"ID": ID})
+		return
+	}
+
+	ObjectID, err := primitive.ObjectIDFromHex(ID)
+	if err != nil {
+		logger.LogError(err, "Websocket Error Parsing ObjectID", nil)
 		return
 	}
 
 	// Ensure only one connection per user
-	if existingConn, exists := GetConnection(userID); exists {
-		log.Println("Closing previous connection for user:", userID)
+	if existingConn, exists := GetConnection(ID); exists {
+		logger.LogInfo("Websocket Connection Already Exists, Closing Existing Connection", map[string]interface{}{"ID": ID})
 		existingConn.Close()
 	}
 
-	AddConnection(userID, c)
-	log.Println("User connected:", userID)
+	AddConnection(ID, c)
+	logger.LogInfo("Websocket Connection Established", map[string]interface{}{"ID": ID})
 
 	err = services.UpdateUserStatus(ObjectID, "online", time.Time{})
 	if err != nil {
-		log.Println("Error updating user status:", err)
+		logger.LogError(err, "Websocket Error Updating User Status", nil)
 	}
 
-	// Optional message to client
-	err = c.WriteMessage(websocket.TextMessage, []byte("Hello from server!"))
+	err = c.WriteMessage(websocket.TextMessage, []byte("Connected to websocket"))
 	if err != nil {
-		log.Println("Error sending message:", err)
+		logger.LogError(err, "Websocket Error Writing Message", nil)
 		return
 	}
 
@@ -69,25 +75,49 @@ func HandleWebSocketConnection(c *websocket.Conn) {
 	for {
 		mt, msg, err := c.ReadMessage()
 		if err != nil {
-			log.Println("Error reading message:", err)
+			logger.LogError(err, "Websocket Error Reading Message", nil)
 			break
 		}
-
-		log.Printf("Received message: %s", msg)
-
-		err = c.WriteMessage(mt, msg)
+	
+		var data struct {
+			Longitude float64 `json:"longitude"`
+			Latitude  float64 `json:"latitude"`
+		}
+		
+		if err := json.Unmarshal(msg, &data); err != nil {
+			logger.LogError(err, "Websocket Message Received Is Not A Location", nil)
+			break
+		}
+	
+		logger.LogInfo("Websocket Message Parsed", map[string]interface{}{"ID": ID, "longitude": data.Longitude, "latitude": data.Latitude})
+	
+		response := struct {
+			Status  string  `json:"status"`
+			Message string  `json:"message"`
+		}{
+			Status:  "OK",
+			Message: "Data received successfully",
+		}
+	
+		responseMsg, err := json.Marshal(response)
 		if err != nil {
-			log.Println("Error sending response:", err)
+			logger.LogError(err, "Error marshaling response message", nil)
 			break
 		}
-	}
+	
+		err = c.WriteMessage(mt, responseMsg)
+		if err != nil {
+			logger.LogError(err, "Websocket Error Writing Message", nil)
+			break
+		}
+	}	
 
 	// Disconnect user
-	RemoveConnection(userID)
-	log.Println("User disconnected:", userID)
+	RemoveConnection(ID)
+	logger.LogInfo("Websocket Connection Closed", map[string]interface{}{"ID": ID})
 
 	err = services.UpdateUserStatus(ObjectID, "offline", time.Now())
 	if err != nil {
-		log.Println("Error updating user status:", err)
+		logger.LogError(err, "Websocket Error Updating User Status", nil)
 	}
 }

@@ -5,15 +5,38 @@ import (
 
 	"net/mail"
 	"shuttle/databases"
-	"shuttle/models"
 	"shuttle/errors"
+	"shuttle/models"
 	"strings"
 	"time"
 
 	"github.com/spf13/viper"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 )
+
+func GetSpecUser(id string) (models.User, error) {
+	client, err := database.MongoConnection()
+	if err != nil {
+		return models.User{}, err
+	}
+
+	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+	var user models.User
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return user, err
+	}
+
+	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
+	if err != nil {
+		return models.User{}, err
+	}
+
+	return user, nil
+}
 
 func GetAllSuperAdmin() ([]models.UserResponse, error) {
 	client, err := database.MongoConnection()
@@ -78,7 +101,52 @@ func GetAllSchoolAdmin() ([]models.UserResponse, error) {
 
 	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
 
-	cursor, err := collection.Find(context.Background(), bson.M{"role": models.SchoolAdmin})
+	pipeline := mongo.Pipeline{
+		{
+			{Key: "$match", Value: bson.D{
+				{Key: "role", Value: models.SchoolAdmin},
+			}},
+		},
+		{
+			{Key: "$lookup", Value: bson.D{
+				{Key: "from", Value: "schools"},
+				{Key: "localField", Value: "details.school_id"},
+				{Key: "foreignField", Value: "_id"},
+				{Key: "as", Value: "school_details"},
+			}},
+		},
+		{
+			{Key: "$unwind", Value: bson.D{
+				{Key: "path", Value: "$school_details"},
+				{Key: "preserveNullAndEmptyArrays", Value: true},
+			}},
+		},
+		{
+			{Key: "$project", Value: bson.D{
+				{Key: "id", Value: "$_id"},
+				{Key: "picture", Value: 1},
+				{Key: "first_name", Value: 1},
+				{Key: "last_name", Value: 1},
+				{Key: "gender", Value: 1},
+				{Key: "email", Value: 1},
+				{Key: "role", Value: 1},
+				{Key: "role_code", Value: 1},
+				{Key: "phone", Value: 1},
+				{Key: "address", Value: 1},
+				{Key: "status", Value: 1},
+				{Key: "last_active", Value: 1},
+				{Key: "details", Value: bson.D{
+					{Key: "school_name", Value: bson.M{"$ifNull": []interface{}{"$school_details.name", ""}}},
+				}},
+				{Key: "created_at", Value: 1},
+				{Key: "created_by", Value: 1},
+				{Key: "updated_at", Value: 1},
+				{Key: "updated_by", Value: 1},
+			}},
+		},
+	}	
+
+	cursor, err := collection.Aggregate(context.Background(), pipeline)
 	if err != nil {
 		return nil, err
 	}
@@ -120,17 +188,74 @@ func GetSpecSchoolAdmin(id string) (models.UserResponse, error) {
 		return user, err
 	}
 
-	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
+	pipeline := mongo.Pipeline{
+		{
+			{Key: "$match", Value: bson.D{
+				{Key: "_id", Value: objectID},
+				{Key: "role", Value: models.SchoolAdmin},
+			}},
+		},
+		{
+			{Key: "$lookup", Value: bson.D{
+				{Key: "from", Value: "schools"},
+				{Key: "localField", Value: "details.school_id"},
+				{Key: "foreignField", Value: "_id"},
+				{Key: "as", Value: "school_details"},
+			}},
+		},
+		{
+			{Key: "$unwind", Value: bson.D{
+				{Key: "path", Value: "$school_details"},
+				{Key: "preserveNullAndEmptyArrays", Value: true},
+			}},
+		},
+		{
+			{Key: "$project", Value: bson.D{
+				{Key: "id", Value: "$_id"},
+				{Key: "picture", Value: 1},
+				{Key: "first_name", Value: 1},
+				{Key: "last_name", Value: 1},
+				{Key: "gender", Value: 1},
+				{Key: "email", Value: 1},
+				{Key: "role", Value: 1},
+				{Key: "role_code", Value: 1},
+				{Key: "phone", Value: 1},
+				{Key: "address", Value: 1},
+				{Key: "status", Value: 1},
+				{Key: "last_active", Value: 1},
+				{Key: "details", Value: bson.D{
+					{Key: "school_id", Value: "$details.school_id"},
+					{Key: "school_name", Value: bson.M{"$ifNull": []interface{}{"$school_details.name", ""}}},
+				}},
+				{Key: "created_at", Value: 1},
+				{Key: "created_by", Value: 1},
+				{Key: "updated_at", Value: 1},
+				{Key: "updated_by", Value: 1},
+			}},
+		},
+	}
+	
+	cursor, err := collection.Aggregate(context.Background(), pipeline)
 	if err != nil {
 		return models.UserResponse{}, err
 	}
+	defer cursor.Close(context.Background())
 
-	if details, ok := user.Details.(primitive.D); ok {
-		detailsMap := make(map[string]interface{})
-		for _, elem := range details {
-			detailsMap[elem.Key] = elem.Value
+	for cursor.Next(context.Background()) {
+		if err := cursor.Decode(&user); err != nil {
+			return models.UserResponse{}, err
 		}
-		user.Details = detailsMap
+		if details, ok := user.Details.(primitive.D); ok {
+			detailsMap := make(map[string]interface{})
+			for _, elem := range details {
+				detailsMap[elem.Key] = elem.Value
+			}
+			user.Details = detailsMap
+		}
+	}
+
+	if err := cursor.Err(); err != nil {
+		return models.UserResponse{}, err
 	}
 
 	return user, nil
@@ -145,47 +270,67 @@ func GetAllDriverFromAllSchools() ([]models.UserResponse, error) {
     var users []models.UserResponse
     collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
 
-    cursor, err := collection.Find(context.Background(), bson.M{"role": models.Driver})
-    if err != nil {
-        return nil, err
-    }
-    defer cursor.Close(context.Background())
-
-    for cursor.Next(context.Background()) {
-        var user models.UserResponse
-        if err := cursor.Decode(&user); err != nil {
-            return nil, err
-        }
-        if details, ok := user.Details.(primitive.D); ok {
-            detailsMap := make(map[string]interface{})
-            for _, elem := range details {
-                detailsMap[elem.Key] = elem.Value
-            }
-            user.Details = detailsMap
-        }
-        users = append(users, user)
-    }
-
-    if err := cursor.Err(); err != nil {
-        return nil, err
-    }
-
-    return users, nil
-}
-
-func GetAllDriverForPermittedSchool(schoolID primitive.ObjectID) ([]models.UserResponse, error) {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return nil, err
+    pipeline := mongo.Pipeline{
+		{
+			{Key: "$match", Value: bson.D{
+				{Key: "role", Value: models.Driver},
+			}},
+		},
+		{
+			{Key: "$lookup", Value: bson.D{
+				{Key: "from", Value: "schools"},
+				{Key: "localField", Value: "details.school_id"},
+				{Key: "foreignField", Value: "_id"},
+				{Key: "as", Value: "school_details"},
+			}},
+		},
+		{
+			{Key: "$unwind", Value: bson.D{
+				{Key: "path", Value: "$school_details"},
+				{Key: "preserveNullAndEmptyArrays", Value: true},
+			}},
+		},
+		{
+			{Key: "$lookup", Value: bson.D{
+				{Key: "from", Value: "vehicles"},
+				{Key: "localField", Value: "details.vehicle_id"},
+				{Key: "foreignField", Value: "_id"},
+				{Key: "as", Value: "vehicle_details"},
+			}},
+		},
+		{
+			{Key: "$unwind", Value: bson.D{
+				{Key: "path", Value: "$vehicle_details"},
+				{Key: "preserveNullAndEmptyArrays", Value: true},
+			}},
+		},
+		{
+			{Key: "$project", Value: bson.D{
+				{Key: "id", Value: "$_id"},
+				{Key: "picture", Value: 1},
+				{Key: "first_name", Value: 1},
+				{Key: "last_name", Value: 1},
+				{Key: "gender", Value: 1},
+				{Key: "email", Value: 1},
+				{Key: "role", Value: 1},
+				{Key: "role_code", Value: 1},
+				{Key: "phone", Value: 1},
+				{Key: "address", Value: 1},
+				{Key: "status", Value: 1},
+				{Key: "details", Value: bson.D{
+					{Key: "license_number", Value: "$details.license_number"},
+					{Key: "school_name", Value: bson.M{"$ifNull": []interface{}{"$school_details.name", ""}}},
+					{Key: "vehicle_name", Value: bson.M{"$ifNull": []interface{}{"$vehicle_details.name", ""}}},
+				}},
+				{Key: "created_at", Value: 1},
+				{Key: "created_by", Value: 1},
+				{Key: "updated_at", Value: 1},
+				{Key: "updated_by", Value: 1},
+			}},
+		},
 	}
 
-	var users []models.UserResponse
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	cursor, err := collection.Find(context.Background(), bson.M{
-		"role_code": "D",
-		"details.school_id": schoolID,
-	})
+	cursor, err := collection.Aggregate(context.Background(), pipeline)
 	if err != nil {
 		return nil, err
 	}
@@ -203,7 +348,104 @@ func GetAllDriverForPermittedSchool(schoolID primitive.ObjectID) ([]models.UserR
 			}
 			user.Details = detailsMap
 		}
+		users = append(users, user)
+	}
 
+	if err := cursor.Err(); err != nil {
+		return nil, err
+	}
+
+	return users, nil
+}
+
+func GetAllDriverForPermittedSchool(schoolID primitive.ObjectID) ([]models.UserResponse, error) {
+	client, err := database.MongoConnection()
+	if err != nil {
+		return nil, err
+	}
+
+	var users []models.UserResponse
+	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+	pipeline := mongo.Pipeline{
+		{
+			{Key: "$match", Value: bson.D{
+				{Key: "role", Value: models.Driver},
+				{Key: "details.school_id", Value: schoolID},
+			}},
+		},
+		{
+			{Key: "$lookup", Value: bson.D{
+				{Key: "from", Value: "schools"},
+				{Key: "localField", Value: "details.school_id"},
+				{Key: "foreignField", Value: "_id"},
+				{Key: "as", Value: "school_details"},
+			}},
+		},
+		{
+			{Key: "$unwind", Value: bson.D{
+				{Key: "path", Value: "$school_details"},
+				{Key: "preserveNullAndEmptyArrays", Value: true},
+			}},
+		},
+		{
+			{Key: "$lookup", Value: bson.D{
+				{Key: "from", Value: "vehicles"},
+				{Key: "localField", Value: "details.vehicle_id"},
+				{Key: "foreignField", Value: "_id"},
+				{Key: "as", Value: "vehicle_details"},
+			}},
+		},
+		{
+			{Key: "$unwind", Value: bson.D{
+				{Key: "path", Value: "$vehicle_details"},
+				{Key: "preserveNullAndEmptyArrays", Value: true},
+			}},
+		},
+		{
+			{Key: "$project", Value: bson.D{
+				{Key: "id", Value: "$_id"},
+				{Key: "picture", Value: 1},
+				{Key: "first_name", Value: 1},
+				{Key: "last_name", Value: 1},
+				{Key: "gender", Value: 1},
+				{Key: "email", Value: 1},
+				{Key: "role", Value: 1},
+				{Key: "role_code", Value: 1},
+				{Key: "phone", Value: 1},
+				{Key: "address", Value: 1},
+				{Key: "status", Value: 1},
+				{Key: "details", Value: bson.D{
+					{Key: "license_number", Value: "$details.license_number"},
+					{Key: "school_name", Value: bson.M{"$ifNull": []interface{}{"$school_details.name", ""}}},
+					{Key: "vehicle_name", Value: bson.M{"$ifNull": []interface{}{"$vehicle_details.name", ""}}},
+				}},
+				{Key: "created_at", Value: 1},
+				{Key: "created_by", Value: 1},
+				{Key: "updated_at", Value: 1},
+				{Key: "updated_by", Value: 1},
+			}},
+		},
+	}
+
+	cursor, err := collection.Aggregate(context.Background(), pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(context.Background())
+
+	for cursor.Next(context.Background()) {
+		var user models.UserResponse
+		if err := cursor.Decode(&user); err != nil {
+			return nil, err
+		}
+		if details, ok := user.Details.(primitive.D); ok {
+			detailsMap := make(map[string]interface{})
+			for _, elem := range details {
+				detailsMap[elem.Key] = elem.Value
+			}
+			user.Details = detailsMap
+		}
 		users = append(users, user)
 	}
 
@@ -228,17 +470,93 @@ func GetSpecDriverFromAllSchools(id string) (models.UserResponse, error) {
 		return user, err
 	}
 
-	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
+	pipeline := mongo.Pipeline{
+		{
+			{Key: "$match", Value: bson.D{
+				{Key: "_id", Value: objectID},
+				{Key: "role", Value: models.Driver},
+			}},
+		},
+		{
+			{Key: "$lookup", Value: bson.D{
+				{Key: "from", Value: "schools"},
+				{Key: "localField", Value: "details.school_id"},
+				{Key: "foreignField", Value: "_id"},
+				{Key: "as", Value: "school_details"},
+			}},
+		},
+		{
+			{Key: "$unwind", Value: bson.D{
+				{Key: "path", Value: "$school_details"},
+				{Key: "preserveNullAndEmptyArrays", Value: true},
+			}},
+		},
+		{
+			{Key: "$lookup", Value: bson.D{
+				{Key: "from", Value: "vehicles"},
+				{Key: "localField", Value: "details.vehicle_id"},
+				{Key: "foreignField", Value: "_id"},
+				{Key: "as", Value: "vehicle_details"},
+			}},
+		},
+		{
+			{Key: "$unwind", Value: bson.D{
+				{Key: "path", Value: "$vehicle_details"},
+				{Key: "preserveNullAndEmptyArrays", Value: true},
+			}},
+		},
+		{
+			{Key: "$project", Value: bson.D{
+				{Key: "id", Value: "$_id"},
+				{Key: "picture", Value: 1},
+				{Key: "first_name", Value: 1},
+				{Key: "last_name", Value: 1},
+				{Key: "gender", Value: 1},
+				{Key: "email", Value: 1},
+				{Key: "role", Value: 1},
+				{Key: "role_code", Value: 1},
+				{Key: "phone", Value: 1},
+				{Key: "address", Value: 1},
+				{Key: "status", Value: 1},
+				{Key: "details", Value: bson.D{
+					{Key: "license_number", Value: "$details.license_number"},
+					{Key: "school_id", Value: "$details.school_id"},
+					{Key: "school_name", Value: bson.M{"$ifNull": []interface{}{"$school_details.name", ""}}},
+					{Key: "vehicle_id", Value: "$details.vehicle_id"},
+					{Key: "vehicle_name", Value: bson.M{"$ifNull": []interface{}{"$vehicle_details.name", ""}}},
+				}},
+				{Key: "created_at", Value: 1},
+				{Key: "created_by", Value: 1},
+				{Key: "updated_at", Value: 1},
+				{Key: "updated_by", Value: 1},
+			}},
+		},
+	}
+
+	cursor, err := collection.Aggregate(context.Background(), pipeline)
 	if err != nil {
 		return models.UserResponse{}, err
 	}
+	defer cursor.Close(context.Background())
 
-	if details, ok := user.Details.(primitive.D); ok {
-		detailsMap := make(map[string]interface{})
-		for _, elem := range details {
-			detailsMap[elem.Key] = elem.Value
+	if cursor.Next(context.Background()) {
+		if err := cursor.Decode(&user); err != nil {
+			return models.UserResponse{}, err
 		}
-		user.Details = detailsMap
+
+		if details, ok := user.Details.(bson.D); ok {
+			detailsMap := make(map[string]interface{})
+			for _, elem := range details {
+				detailsMap[elem.Key] = elem.Value
+			}
+			user.Details = detailsMap
+		}
+	} else {
+		return models.UserResponse{}, err
+	}
+
+	if err := cursor.Err(); err != nil {
+		return models.UserResponse{}, err
 	}
 
 	return user, nil
@@ -258,42 +576,93 @@ func GetSpecDriverForPermittedSchool(id string, schoolID primitive.ObjectID) (mo
 		return user, err
 	}
 
-	err = collection.FindOne(context.Background(), bson.M{
-		"_id": objectID,
-		"details.school_id": schoolID,
-	}).Decode(&user)
+	pipeline := mongo.Pipeline{
+		{
+			{Key: "$match", Value: bson.D{
+				{Key: "_id", Value: objectID},
+				{Key: "role", Value: models.Driver},
+				{Key: "details.school_id", Value: schoolID},
+			}},
+		},
+		{
+			{Key: "$lookup", Value: bson.D{
+				{Key: "from", Value: "schools"},
+				{Key: "localField", Value: "details.school_id"},
+				{Key: "foreignField", Value: "_id"},
+				{Key: "as", Value: "school_details"},
+			}},
+		},
+		{
+			{Key: "$unwind", Value: bson.D{
+				{Key: "path", Value: "$school_details"},
+				{Key: "preserveNullAndEmptyArrays", Value: true},
+			}},
+		},
+		{
+			{Key: "$lookup", Value: bson.D{
+				{Key: "from", Value: "vehicles"},
+				{Key: "localField", Value: "details.vehicle_id"},
+				{Key: "foreignField", Value: "_id"},
+				{Key: "as", Value: "vehicle_details"},
+			}},
+		},
+		{
+			{Key: "$unwind", Value: bson.D{
+				{Key: "path", Value: "$vehicle_details"},
+				{Key: "preserveNullAndEmptyArrays", Value: true},
+			}},
+		},
+		{
+			{Key: "$project", Value: bson.D{
+				{Key: "id", Value: "$_id"},
+				{Key: "picture", Value: 1},
+				{Key: "first_name", Value: 1},
+				{Key: "last_name", Value: 1},
+				{Key: "gender", Value: 1},
+				{Key: "email", Value: 1},
+				{Key: "role", Value: 1},
+				{Key: "role_code", Value: 1},
+				{Key: "phone", Value: 1},
+				{Key: "address", Value: 1},
+				{Key: "status", Value: 1},
+				{Key: "details", Value: bson.D{
+					{Key: "license_number", Value: "$details.license_number"},
+					{Key: "school_name", Value: bson.M{"$ifNull": []interface{}{"$school_details.name", ""}}},
+					{Key: "vehicle_id", Value: "$details.vehicle_id"},
+					{Key: "vehicle_name", Value: bson.M{"$ifNull": []interface{}{"$vehicle_details.name", ""}}},
+				}},
+				{Key: "created_at", Value: 1},
+				{Key: "created_by", Value: 1},
+				{Key: "updated_at", Value: 1},
+				{Key: "updated_by", Value: 1},
+			}},
+		},
+	}
+
+	cursor, err := collection.Aggregate(context.Background(), pipeline)
 	if err != nil {
 		return models.UserResponse{}, err
 	}
+	defer cursor.Close(context.Background())
 
-	if details, ok := user.Details.(primitive.D); ok {
-		detailsMap := make(map[string]interface{})
-		for _, elem := range details {
-			detailsMap[elem.Key] = elem.Value
+	if cursor.Next(context.Background()) {
+		if err := cursor.Decode(&user); err != nil {
+			return models.UserResponse{}, err
 		}
-		user.Details = detailsMap
+
+		if details, ok := user.Details.(bson.D); ok {
+			detailsMap := make(map[string]interface{})
+			for _, elem := range details {
+				detailsMap[elem.Key] = elem.Value
+			}
+			user.Details = detailsMap
+		}
+	} else {
+		return models.UserResponse{}, err
 	}
 
-	return user, nil
-}
-
-func GetSpecUser(id string) (models.User, error) {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return models.User{}, err
-	}
-
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	var user models.User
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return user, err
-	}
-
-	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
-	if err != nil {
-		return models.User{}, err
+	if err := cursor.Err(); err != nil {
+		return models.UserResponse{}, err
 	}
 
 	return user, nil
@@ -310,6 +679,10 @@ func AddUser(user models.User, username string) (primitive.ObjectID, error) {
     if err := validateCommonFields(user); err != nil {
         return primitive.NilObjectID, err
     }
+
+	if len(user.Password) < 8 {
+		return primitive.NilObjectID, errors.New("password must be at least 8 characters", 400)
+	}
 
     if user.Password != "" {
         hashedPassword, err := hashPassword(user.Password)
@@ -357,21 +730,12 @@ func UpdateUser(id string, user models.User, username string, file []byte) error
         return err
     }
 
-    if user.Password != "" {
-        hashedPassword, err := hashPassword(user.Password)
-        if err != nil {
-            return err
-        }
-        user.Password = hashedPassword
-    }
-
     updateFields := bson.M{
 		"picture":    user.Picture,
         "first_name": user.FirstName,
         "last_name":  user.LastName,
 		"gender":     user.Gender,
         "email":      user.Email,
-        "password":   user.Password,
         "role":       user.Role,
 		"phone":      user.Phone,
 		"address":    user.Address,
@@ -586,10 +950,6 @@ func UpdateUserStatus(userID primitive.ObjectID, status string, lastActive time.
 }
 
 func validateCommonFields(user models.User) error {
-	if len(user.Password) < 8 {
-		return errors.New("password must be at least 8 characters", 400)
-	}
-
 	validRoles := map[models.Role]bool{
 		models.SuperAdmin:  true,
 		models.SchoolAdmin: true,

@@ -112,7 +112,7 @@ func Logout(c *fiber.Ctx) error {
 
 func GetMyProfile(c *fiber.Ctx) error {
 	UserID := c.Locals("userId").(string)
-	RoleCode := c.Locals("roleCode").(string)
+	RoleCode := c.Locals("role_code").(string)
 	
 	user, err := services.GetMyProfile(UserID, RoleCode)
 	if err != nil {

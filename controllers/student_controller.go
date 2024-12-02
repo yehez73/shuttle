@@ -13,10 +13,10 @@ import (
 )
 
 func GetAllStudentWithParents(c *fiber.Ctx) error {
-	SchoolObjID, err := primitive.ObjectIDFromHex(c.Locals("school_id").(string))
+	SchoolObjID, err := primitive.ObjectIDFromHex(c.Locals("schoolId").(string))
 	if err != nil {
 		logger.LogError(err, "Failed to convert school id", map[string]interface{}{
-			"school_id": c.Locals("school_id"),
+			"school_id": c.Locals("schoolId"),
 		})
 		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}
@@ -32,10 +32,10 @@ func GetAllStudentWithParents(c *fiber.Ctx) error {
 
 func AddSchoolStudentWithParents(c *fiber.Ctx) error {
 	username := c.Locals("username").(string)
-	SchoolObjID, err := primitive.ObjectIDFromHex(c.Locals("school_id").(string))
+	SchoolObjID, err := primitive.ObjectIDFromHex(c.Locals("schoolId").(string))
 	if err != nil {
 		logger.LogError(err, "Failed to convert school id", map[string]interface{}{
-			"school_id": c.Locals("school_id"),
+			"school_id": c.Locals("schoolId"),
 		})
 		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}
@@ -70,10 +70,10 @@ func AddSchoolStudentWithParents(c *fiber.Ctx) error {
 
 func UpdateSchoolStudentWithParents(c *fiber.Ctx) error {
 	id := c.Params("id")
-	SchoolObjID, err := primitive.ObjectIDFromHex(c.Locals("school_id").(string))
+	SchoolObjID, err := primitive.ObjectIDFromHex(c.Locals("schoolId").(string))
 	if err != nil {
 		logger.LogError(err, "Failed to convert school id", map[string]interface{}{
-			"school_id": c.Locals("school_id"),
+			"school_id": c.Locals("schoolId"),
 		})
 		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}
@@ -100,10 +100,10 @@ func UpdateSchoolStudentWithParents(c *fiber.Ctx) error {
 
 func DeleteSchoolStudentWithParents(c *fiber.Ctx) error {
 	id := c.Params("id")
-	SchoolObjID, err := primitive.ObjectIDFromHex(c.Locals("school_id").(string))
+	SchoolObjID, err := primitive.ObjectIDFromHex(c.Locals("schoolId").(string))
 	if err != nil {
 		logger.LogError(err, "Failed to convert school id", map[string]interface{}{
-			"school_id": c.Locals("school_id"),
+			"school_id": c.Locals("schoolId"),
 		})
 		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}

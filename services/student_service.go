@@ -100,6 +100,7 @@ func AddPermittedSchoolStudentWithParents(student models.SchoolStudentRequest, s
 	studentDocument := bson.D{
 		{Key: "first_name", Value: student.Student.FirstName},
 		{Key: "last_name", Value: student.Student.LastName},
+		{Key: "class", Value: student.Student.Class},
 		{Key: "parent_id", Value: parentID},
 		{Key: "school_id", Value: schoolID},
 	}

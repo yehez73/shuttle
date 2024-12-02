@@ -20,7 +20,7 @@ func SchoolAdminMiddleware() fiber.Handler {
 			return utils.ForbiddenResponse(c, "You don't have permission to any school, please contact the support team", nil)
 		}
 
-		c.Locals("schoolId", schoolID)
+		c.Locals("schoolId", schoolID.Hex())
 
 		return c.Next()
 	}
