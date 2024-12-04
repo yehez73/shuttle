@@ -39,13 +39,12 @@ func init() {
 }
 
 // Signed Access Token
-func GenerateToken(userId, name, role, role_code string) (string, error) {
+func GenerateToken(userId, name, role_code string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"userId": userId,
-		"name":   name,
-		"role":   role,
+		"sub":       userId,
+		"name":      name,
 		"role_code": role_code,
-		"exp":    time.Now().Add(time.Hour * 6).Unix(), // 2 hours expiration
+		"exp":       time.Now().Add(time.Hour * 6).Unix(), // 2 hours expiration
 	})
 
 	signedToken, err := token.SignedString(jwtSecret)
@@ -62,13 +61,13 @@ func GenerateToken(userId, name, role, role_code string) (string, error) {
 }
 
 // Same, but with 15 days expiration time and for reissuing access token
-func GenerateRefreshToken(userId, name, role, role_code string) (string, error) {
+func GenerateRefreshToken(userId, name, role_code string) (string, error) {
+
 	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"userId": userId,
-		"name":   name,
-		"role":   role,
+		"sub":       userId,
+		"name":      name,
 		"role_code": role_code,
-		"exp":    time.Now().Add(time.Hour * 24 * 15).Unix(), // 15 days expiration
+		"exp":       time.Now().Add(time.Hour * 24 * 15).Unix(), // 15 days expiration
 	})
 
 	signedRefreshToken, err := refreshToken.SignedString(jwtSecret)

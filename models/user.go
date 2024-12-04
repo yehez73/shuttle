@@ -49,11 +49,12 @@ func ParseRole(roleStr string) (Role, error) {
 type User struct {
 	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	Picture    string             `json:"picture" bson:"picture"`
+	Username   string             `json:"username" bson:"username" validate:"required"`
 	FirstName  string             `json:"first_name" bson:"first_name" validate:"required"`
 	LastName   string             `json:"last_name" bson:"last_name" validate:"required"`
 	Gender     Gender             `json:"gender" bson:"gender" validate:"required"`
 	Email      string             `json:"email" bson:"email" validate:"required"`
-	Password   string             `json:"password" bson:"password" validate:"required"`
+	Password   string             `json:"password" bson:"password"`
 	Role       Role               `json:"role" bson:"role" validate:"required"`
 	RoleCode   string             `json:"role_code" bson:"role_code"`
 	Phone      string             `json:"phone" bson:"phone" validate:"required"`
@@ -86,6 +87,7 @@ type DriverDetails struct {
 type UserResponse struct {
 	ID         primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	Picture    string             `json:"picture" bson:"picture"`
+	Username   string             `json:"username" bson:"username" validate:"required"`
 	FirstName  string             `json:"first_name" bson:"first_name" validate:"required"`
 	LastName   string             `json:"last_name" bson:"last_name" validate:"required"`
 	Gender     Gender             `json:"gender" bson:"gender" validate:"required"`

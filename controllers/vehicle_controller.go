@@ -38,7 +38,7 @@ func AddVehicle (c *fiber.Ctx) error {
 	}
 
 	if err := utils.ValidateStruct(c, vehicle); err != nil {
-		return err
+		return utils.BadRequestResponse(c, err.Error(), nil)
 	}
 
 	if err := services.AddVehicle(*vehicle); err != nil {
@@ -57,7 +57,7 @@ func UpdateVehicle (c *fiber.Ctx) error {
 	}
 
 	if err := utils.ValidateStruct(c, vehicle); err != nil {
-		return err
+		return utils.BadRequestResponse(c, err.Error(), nil)
 	}
 
 	if err := services.UpdateVehicle(*vehicle, id); err != nil {

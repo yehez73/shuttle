@@ -46,7 +46,7 @@ func AddSchoolStudentWithParents(c *fiber.Ctx) error {
 	}
 
 	if err := utils.ValidateStruct(c, student); err != nil {
-		return err
+		return utils.BadRequestResponse(c, err.Error(), nil)
 	}
 
 	if (models.User{}) == student.Parent {
@@ -84,7 +84,7 @@ func UpdateSchoolStudentWithParents(c *fiber.Ctx) error {
 	}
 
 	if err := utils.ValidateStruct(c, student); err != nil {
-		return err
+		return utils.BadRequestResponse(c, err.Error(), nil)
 	}
 
 	if err := services.UpdatePermittedSchoolStudentWithParents(id, *student, SchoolObjID); err != nil {

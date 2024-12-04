@@ -120,7 +120,7 @@ func AddUser(c *fiber.Ctx) error {
 	}
 
 	if err := utils.ValidateStruct(c, user); err != nil {
-		return err
+		return utils.BadRequestResponse(c, err.Error(), nil)
 	}
 
 	if _, err := services.AddUser(*user, username); err != nil {
@@ -151,7 +151,7 @@ func AddSchoolDriver(c *fiber.Ctx) error {
 	}
 
 	if err := utils.ValidateStruct(c, user); err != nil {
-		return err
+		return utils.BadRequestResponse(c, err.Error(), nil)
 	}
 
 	driverDetails := map[string]interface{}{
@@ -193,10 +193,12 @@ func UpdateUser(c *fiber.Ctx) error {
     if err != nil {
         return utils.BadRequestResponse(c, "Invalid role", nil)
     }
+	
     user.Role = role
+	user.Password = existingUser.Password
 
     if err := utils.ValidateStruct(c, user); err != nil {
-		return err
+		return utils.BadRequestResponse(c, err.Error(), nil)
 	}
 
     user.Picture, err = utils.HandleAssetsOnUpdate(c, existingUser.Picture)
@@ -261,7 +263,7 @@ func UpdateSchoolDriver(c *fiber.Ctx) error {
     user.Details = driverDetails
 
     if err := utils.ValidateStruct(c, user); err != nil {
-		return err
+		return utils.BadRequestResponse(c, err.Error(), nil)
 	}
 
     user.Picture, err = utils.HandleAssetsOnUpdate(c, existingDriver.Picture)

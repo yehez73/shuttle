@@ -1,6 +1,10 @@
 package controllers
 
 import (
+	"net/mail"
+	"regexp"
+
+	"shuttle/errors"
 	"shuttle/logger"
 	"shuttle/models"
 	"shuttle/services"
@@ -37,8 +41,8 @@ func AddSchool(c *fiber.Ctx) error {
 		return utils.BadRequestResponse(c, "Invalid request data", nil)
 	}
 
-	if err := utils.ValidateStruct(c, school); err != nil {
-		return err
+	if err := validateCommonFields(c, school); err != nil {
+		return utils.BadRequestResponse(c, err.Error(), nil)
 	}
 
 	if err := services.AddSchool(*school); err != nil {
@@ -56,8 +60,8 @@ func UpdateSchool(c *fiber.Ctx) error {
 		return utils.BadRequestResponse(c, "Invalid request data", nil)
 	}
 
-	if err := utils.ValidateStruct(c, school); err != nil {
-		return err
+	if err := validateCommonFields(c, school); err != nil {
+		return utils.BadRequestResponse(c, err.Error(), nil)
 	}
 
 	if err := services.UpdateSchool(id, *school); err != nil {
@@ -77,4 +81,40 @@ func DeleteSchool(c *fiber.Ctx) error {
 	}
 
 	return utils.SuccessResponse(c, "School deleted successfully", nil)
+}
+
+func validateCommonFields(c *fiber.Ctx, school *models.School) error {
+	if school.Name == "" {
+		logger.LogError(nil, "School name is required", nil)
+		return errors.New("School name is required", 0)
+	}
+
+	if school.Address == "" {
+		logger.LogError(nil, "School address is required", nil)
+		return errors.New("School address is required", 0)
+	}
+
+	if school.Contact == "" {
+		logger.LogError(nil, "School contact number is required", nil)
+		return errors.New("School contact number is required", 0)
+	}
+
+	phoneRegex := regexp.MustCompile(`^\+?[0-9]{10,15}$`)
+	if !phoneRegex.MatchString(school.Contact) {
+		logger.LogError(nil, "Invalid contact number format", nil)
+		return errors.New("Invalid contact number format", 0)
+	}
+
+	if len(school.Contact) < 12 || len(school.Contact) > 15 {
+		logger.LogError(nil, "Contact number should be between 12 to 15 characters", nil)
+		return errors.New("Contact number should be between 12 to 15 characters", 0)
+	}
+
+	_, err := mail.ParseAddress(school.Email)
+	if err != nil {
+		logger.LogError(err, "Invalid email address", nil)
+		return errors.New("Invalid email address", 0)
+	}
+
+	return nil
 }

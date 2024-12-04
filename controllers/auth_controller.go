@@ -34,7 +34,7 @@ func Login(c *fiber.Ctx) error {
 	Fullname := user.FirstName + " " + user.LastName
 
 	// Access token (short expiration)
-	accessToken, err := utils.GenerateToken(user.ID.Hex(), Fullname, string(user.Role), user.RoleCode)
+	accessToken, err := utils.GenerateToken(user.ID.Hex(), Fullname, user.RoleCode)
 	if err != nil {
 		logger.LogError(err, "Failed to generate access token", map[string]interface{}{
 			"user_id": user.ID.Hex(),
@@ -43,7 +43,7 @@ func Login(c *fiber.Ctx) error {
 	}
 
 	// Refresh token (long expiration)
-	refreshToken, err := utils.GenerateRefreshToken(user.ID.Hex(), Fullname, string(user.Role), user.RoleCode)
+	refreshToken, err := utils.GenerateRefreshToken(user.ID.Hex(), Fullname, user.RoleCode)
 	if err != nil {
 		logger.LogError(err, "Failed to generate refresh token", map[string]interface{}{
 			"user_id": user.ID.Hex(),
@@ -138,18 +138,18 @@ func RefreshToken(c *fiber.Ctx) error {
 		return utils.UnauthorizedResponse(c, "Invalid refresh token", nil)
 	}
 
-	userID := claims["userId"].(string)
+	userId := claims["sub"].(string)
 
-	storedRefreshToken, err := services.GetStoredRefreshToken(userID)
+	storedRefreshToken, err := services.GetStoredRefreshToken(userId)
 	if err != nil {
 		logger.LogError(err, "Failed to get stored refresh token", map[string]interface{}{
-			"user_id": userID,
+			"user_id": userId,
 		})
 		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}
 
 	if storedRefreshToken != refreshToken {
-		logger.LogWarn("Invalid refresh token", map[string]interface{}{})
+		logger.LogWarn("Invalid refresh token mmk", map[string]interface{}{})
 		return utils.UnauthorizedResponse(c, "Invalid refresh token", nil)
 	}
 
@@ -158,13 +158,11 @@ func RefreshToken(c *fiber.Ctx) error {
 		return utils.UnauthorizedResponse(c, "Refresh token has expired", nil)
 	}
 
-	userId := claims["userId"].(string)
 	name := claims["name"].(string)
-	role := claims["role"].(string)
 	role_code := claims["role_code"].(string)
 
 	// Generate new access token
-	accessToken, err := utils.GenerateToken(userId, name, role, role_code)
+	accessToken, err := utils.GenerateToken(userId, name, role_code)
 	if err != nil {
 		logger.LogError(err, "Failed to generate access token", map[string]interface{}{
 			"user_id": userId,

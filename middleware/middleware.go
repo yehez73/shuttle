@@ -45,11 +45,11 @@ func AuthenticationMiddleware() fiber.Handler {
 
 		claims, err := utils.ValidateToken(token)
 		if err != nil {
-			logger.LogWarn("Invalid token", map[string]interface{}{})
+			logger.LogWarn("Invalid token", map[string]interface{}{"error": err.Error()})
 			return utils.UnauthorizedResponse(c, "Invalid token", nil)
 		}
 
-		userID, ok := claims["userId"].(string)
+		userID, ok := claims["sub"].(string)
 		if !ok || userID == "" {
 			return utils.UnauthorizedResponse(c, "User ID is missing or invalid", nil)
 		}

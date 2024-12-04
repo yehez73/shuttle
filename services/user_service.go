@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"regexp"
 
 	"net/mail"
 	"shuttle/databases"
@@ -14,6 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 func GetSpecUser(id string) (models.User, error) {
@@ -48,7 +50,19 @@ func GetAllSuperAdmin() ([]models.UserResponse, error) {
 
 	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
 
-	cursor, err := collection.Find(context.Background(), bson.M{"role": models.SuperAdmin})
+	projection := bson.D{
+		{Key: "id", Value: 1},
+		{Key: "username", Value: 1},
+		{Key: "first_name", Value: 1},
+		{Key: "last_name", Value: 1},
+		{Key: "email", Value: 1},
+		{Key: "phone", Value: 1},
+		{Key: "address", Value: 1},
+		{Key: "status", Value: 1},
+		{Key: "last_active", Value: 1},
+	}
+
+	cursor, err := collection.Find(context.Background(), bson.M{"role": models.SuperAdmin}, options.Find().SetProjection(projection))
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +73,25 @@ func GetAllSuperAdmin() ([]models.UserResponse, error) {
 		if err := cursor.Decode(&user); err != nil {
 			return nil, err
 		}
-		users = append(users, user)
+		apiUser := models.UserResponse{
+			ID:        user.ID,
+			Picture:   "N/A",
+			Username:  user.Username,
+			FirstName: user.FirstName,
+			LastName:  user.LastName,
+			Gender:    "N/A",
+			Email:     user.Email,
+			Role:      "N/A",
+			RoleCode:  "N/A",
+			Phone:     user.Phone,
+			Address:   user.Address,
+			Status:    user.Status,
+			LastActive: user.LastActive,
+			CreatedBy: "N/A",
+			UpdatedBy: "N/A",
+			
+		}
+		users = append(users, apiUser)
 	}
 
 	if err := cursor.Err(); err != nil {
@@ -124,13 +156,10 @@ func GetAllSchoolAdmin() ([]models.UserResponse, error) {
 		{
 			{Key: "$project", Value: bson.D{
 				{Key: "id", Value: "$_id"},
-				{Key: "picture", Value: 1},
+				{Key: "username", Value: 1},
 				{Key: "first_name", Value: 1},
 				{Key: "last_name", Value: 1},
-				{Key: "gender", Value: 1},
 				{Key: "email", Value: 1},
-				{Key: "role", Value: 1},
-				{Key: "role_code", Value: 1},
 				{Key: "phone", Value: 1},
 				{Key: "address", Value: 1},
 				{Key: "status", Value: 1},
@@ -138,10 +167,6 @@ func GetAllSchoolAdmin() ([]models.UserResponse, error) {
 				{Key: "details", Value: bson.D{
 					{Key: "school_name", Value: bson.M{"$ifNull": []interface{}{"$school_details.name", ""}}},
 				}},
-				{Key: "created_at", Value: 1},
-				{Key: "created_by", Value: 1},
-				{Key: "updated_at", Value: 1},
-				{Key: "updated_by", Value: 1},
 			}},
 		},
 	}	
@@ -164,7 +189,24 @@ func GetAllSchoolAdmin() ([]models.UserResponse, error) {
 			}
 			user.Details = detailsMap
 		}
-		users = append(users, user)
+		apiUser := models.UserResponse{
+			ID:        user.ID,
+			Picture:   "N/A",
+			Username:  user.Username,
+			FirstName: user.FirstName,
+			LastName:  user.LastName,
+			Gender:   "N/A",
+			Email:     user.Email,
+			Role:      "N/A",
+			RoleCode: "N/A",
+			Phone:     user.Phone,
+			Address:   user.Address,
+			Status:    user.Status,
+			LastActive: user.LastActive,
+			CreatedBy: "N/A",
+			UpdatedBy: "N/A",
+		}
+		users = append(users, apiUser)
 	}
 
 	if err := cursor.Err(); err != nil {
@@ -213,6 +255,7 @@ func GetSpecSchoolAdmin(id string) (models.UserResponse, error) {
 			{Key: "$project", Value: bson.D{
 				{Key: "id", Value: "$_id"},
 				{Key: "picture", Value: 1},
+				{Key: "username", Value: 1},
 				{Key: "first_name", Value: 1},
 				{Key: "last_name", Value: 1},
 				{Key: "gender", Value: 1},
@@ -732,6 +775,7 @@ func UpdateUser(id string, user models.User, username string, file []byte) error
 
     updateFields := bson.M{
 		"picture":    user.Picture,
+		"username":   user.Username,
         "first_name": user.FirstName,
         "last_name":  user.LastName,
 		"gender":     user.Gender,
@@ -756,6 +800,89 @@ func UpdateUser(id string, user models.User, username string, file []byte) error
     )
 
     return err
+}
+
+func DeleteUser(id string) error {
+	client, err := database.MongoConnection()
+	if err != nil {
+		return err
+	}
+
+	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return err
+	}
+
+	var user models.User
+	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
+	if err != nil {
+		return err
+	}
+
+	_, err = collection.DeleteOne(context.Background(), bson.M{"_id": objectID})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func DeleteSchoolDriver(id string, schoolID primitive.ObjectID) error {
+	client, err := database.MongoConnection()
+	if err != nil {
+		return err
+	}
+
+	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+	objectID, err := primitive.ObjectIDFromHex(id)
+	if err != nil {
+		return err
+	}
+
+	var user models.User
+	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
+	if err != nil {
+		return err
+	}
+
+	if details, ok := user.Details.(map[string]interface{}); ok {
+		if details["school_id"].(primitive.ObjectID).Hex() != schoolID.Hex() {
+			return errors.New("driver does not belong to this school", 400)
+		}
+	}
+
+	_, err = collection.DeleteOne(context.Background(), bson.M{"_id": objectID})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func UpdateUserStatus(userID primitive.ObjectID, status string, lastActive time.Time) error {
+	client, err := database.MongoConnection()
+	if err != nil {
+		return err
+	}
+
+	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+	update := bson.M{
+		"$set": bson.M{
+			"status":      status,
+			"last_active": lastActive,
+		},
+	}
+
+	_, err = collection.UpdateOne(context.Background(), bson.M{"_id": userID}, update)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func processRoleDetails(user *models.User) error {
@@ -866,90 +993,24 @@ func processRoleDetails(user *models.User) error {
     return nil
 }
 
-func DeleteUser(id string) error {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return err
-	}
-
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return err
-	}
-
-	var user models.User
-	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
-	if err != nil {
-		return err
-	}
-
-	_, err = collection.DeleteOne(context.Background(), bson.M{"_id": objectID})
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func DeleteSchoolDriver(id string, schoolID primitive.ObjectID) error {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return err
-	}
-
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return err
-	}
-
-	var user models.User
-	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
-	if err != nil {
-		return err
-	}
-
-	if details, ok := user.Details.(map[string]interface{}); ok {
-		if details["school_id"].(primitive.ObjectID).Hex() != schoolID.Hex() {
-			return errors.New("driver does not belong to this school", 400)
-		}
-	}
-
-	_, err = collection.DeleteOne(context.Background(), bson.M{"_id": objectID})
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func UpdateUserStatus(userID primitive.ObjectID, status string, lastActive time.Time) error {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return err
-	}
-
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	update := bson.M{
-		"$set": bson.M{
-			"status":      status,
-			"last_active": lastActive,
-		},
-	}
-
-	_, err = collection.UpdateOne(context.Background(), bson.M{"_id": userID}, update)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func validateCommonFields(user models.User) error {
+	if !regexp.MustCompile(`^[a-zA-Z0-9_-]{3,}$`).MatchString(user.Username) {
+		return errors.New("invalid username", 400)
+	}
+
+	client, err := database.MongoConnection()
+	if err != nil {
+		return err
+	}
+
+	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+
+	var existingUser models.User
+	err = collection.FindOne(context.Background(), bson.M{"username": user.Username}).Decode(&existingUser)
+	if err == nil {
+		return errors.New("username already exists", 409)
+	}
+
 	validRoles := map[models.Role]bool{
 		models.SuperAdmin:  true,
 		models.SchoolAdmin: true,
@@ -968,11 +1029,16 @@ func validateCommonFields(user models.User) error {
 		return errors.New("invalid gender", 400)
 	}
 
+	phoneRegex := regexp.MustCompile(`^\+?[0-9]{10,15}$`)
+	if !phoneRegex.MatchString(user.Phone) {
+		return errors.New("Invalid phone number format", 400)
+	}
+
 	if len(user.Phone) < 12 || len(user.Phone) > 15 {
 		return errors.New("phone number must be between 12 and 15 characters", 400)
 	}
 
-	_, err := mail.ParseAddress(user.Email)
+	_, err = mail.ParseAddress(user.Email)
 	if err != nil {
 		return errors.New("invalid email format", 400)
 	}

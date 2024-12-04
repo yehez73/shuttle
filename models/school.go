@@ -9,6 +9,6 @@ type School struct {
 	Name        string             `json:"name" bson:"name" validate:"required"`
 	Address     string             `json:"address" bson:"address" validate:"required"`
 	Contact     string             `json:"contact" bson:"contact" validate:"required"`
-	Email       string             `json:"email" bson:"email" validate:"required,email"`
-	Description string             `json:"description" bson:"description" validate:"required"`
+	Email       string             `json:"email" bson:"email" validate:"required"`
+	Description string             `json:"description" bson:"description" validate:"max=255"`
 }
