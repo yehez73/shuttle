@@ -2,872 +2,512 @@ package services
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
+	"strconv"
 
-	"net/mail"
 	"shuttle/databases"
 	"shuttle/errors"
-	"shuttle/models"
-	"strings"
+	"shuttle/logger"
+	"shuttle/models/dto"
+	"shuttle/models/entity"
+	"shuttle/repositories"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"github.com/spf13/viper"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
 )
 
-func GetSpecUser(id string) (models.User, error) {
-	client, err := database.MongoConnection()
+type UserServiceInterface interface {
+	GetAllSuperAdmin(page int, limit int, sortField string, sortDirection string) ([]dto.UserResponseDTO, int, error)
+	GetSpecSuperAdmin(uuid string) (dto.UserResponseDTO, error)
+	GetAllSchoolAdmin(page int, limit int, sortField string, sortDirection string) ([]dto.UserResponseDTO, int, error)
+	GetSpecSchoolAdmin(uuid string) (dto.UserResponseDTO, error)
+
+	GetAllDriverFromAllSchools(page int, limit int, sortField string, sortDirection string) ([]dto.UserResponseDTO, error)
+	GetAllDriverForPermittedSchool(page int, limit int, sortField string, sortDirection string, schoolUUID string) ([]dto.UserResponseDTO, int, error)
+
+	AddUser(user entity.User, user_name string) (uuid.UUID, error)
+	UpdateUser(id string, user dto.UserRequestsDTO, user_name string, file []byte) error
+	GetSpecUser(id string) (entity.User, error)
+	GetSpecUserWithDetails(id string) (entity.User, error)
+
+	CheckPermittedSchoolAccess(userUUID string) (string, error)
+}
+
+type UserService struct {
+	userRepository repositories.UserRepositoryInterface
+}
+
+func NewUserService(userRepository repositories.UserRepositoryInterface) UserService {
+	return UserService{
+		userRepository: userRepository,
+	}
+}
+
+func (service *UserService) GetAllSuperAdmin(page int, limit int, sortField, sortDirection string) ([]dto.UserResponseDTO, int, error) {
+	offset := (page - 1) * limit
+
+	users, err := service.userRepository.FetchAllSuperAdmins(offset, limit, sortField, sortDirection)
 	if err != nil {
-		return models.User{}, err
+		return nil, 0, err
 	}
 
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	var user models.User
-	objectID, err := primitive.ObjectIDFromHex(id)
+	total, err := service.userRepository.CountSuperAdmin()
 	if err != nil {
-		return user, err
+		return nil, 0, err
 	}
 
-	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
+	var usersDTO []dto.UserResponseDTO
+
+	for _, user := range users {
+		userDTO := dto.UserResponseDTO{
+			UUID:       user.UUID.String(),
+			Username:   user.Username,
+			Email:      user.Email,
+			Status:     user.Status,
+			LastActive: safeTimeFormat(user.LastActive),
+			CreatedAt:  safeTimeFormat(user.CreatedAt),
+		}
+		if details, ok := user.Details.(entity.SuperAdminDetails); ok {
+			userDTO.Details = dto.SuperAdminDetailsResponseDTO{
+				FirstName: details.FirstName,
+				LastName:  details.LastName,
+				Gender:    dto.Gender(details.Gender),
+				Phone:     details.Phone,
+			}
+		}
+		usersDTO = append(usersDTO, userDTO)
+	}
+
+	return usersDTO, total, nil
+}
+
+func (service *UserService) GetSpecSuperAdmin(uuid string) (dto.UserResponseDTO, error) {
+	user, err := service.userRepository.FetchSpecSuperAdmin(uuid)
 	if err != nil {
-		return models.User{}, err
+		return dto.UserResponseDTO{}, err
+	}
+
+	userDTO := dto.UserResponseDTO{
+		UUID:       user.UUID.String(),
+		Username:   user.Username,
+		Email:      user.Email,
+		Status:     user.Status,
+		LastActive: safeTimeFormat(user.LastActive),
+		CreatedAt:  safeTimeFormat(user.CreatedAt),
+		CreatedBy:  safeStringFormat(user.CreatedBy),
+		UpdatedAt:  safeTimeFormat(user.UpdatedAt),
+		UpdatedBy:  safeStringFormat(user.UpdatedBy),
+	}
+
+	if details, ok := user.Details.(entity.SuperAdminDetails); ok {
+		var Picture string
+		if details.Picture == "" {
+			Picture = "N/A"
+		} else {
+			Picture = details.Picture
+		}
+		userDTO.Details = dto.SuperAdminDetailsResponseDTO{
+			Picture:   Picture,
+			FirstName: details.FirstName,
+			LastName:  details.LastName,
+			Gender:    dto.Gender(details.Gender),
+			Phone:     details.Phone,
+			Address:   details.Address,
+		}
+	}
+
+	return userDTO, nil
+}
+
+func (service *UserService) GetAllSchoolAdmin(page int, limit int, sortField, sortDirection string) ([]dto.UserResponseDTO, int, error) {
+	offset := (page - 1) * limit
+
+	users, school, err := service.userRepository.FetchAllSchoolAdmins(offset, limit, sortField, sortDirection)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	total, err := service.userRepository.CountSchoolAdmin()
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var usersDTO []dto.UserResponseDTO
+
+	for _, user := range users {
+		userDTO := dto.UserResponseDTO{
+			UUID:       user.UUID.String(),
+			Username:   user.Username,
+			Email:      user.Email,
+			Status:     user.Status,
+			LastActive: safeTimeFormat(user.LastActive),
+			CreatedAt:  safeTimeFormat(user.CreatedAt),
+		}
+		if details, ok := user.Details.(entity.SchoolAdminDetails); ok {
+			userDTO.Details = dto.SchoolAdminDetailsResponseDTO{
+				SchoolName: school.Name,
+				Picture:    details.Picture,
+				FirstName:  details.FirstName,
+				LastName:   details.LastName,
+				Gender:     dto.Gender(details.Gender),
+				Phone:      details.Phone,
+			}
+		}
+		usersDTO = append(usersDTO, userDTO)
+	}
+
+	return usersDTO, total, nil
+}
+
+func (service *UserService) GetSpecSchoolAdmin(uuid string) (dto.UserResponseDTO, error) {
+	user, school, err := service.userRepository.FetchSpecSchoolAdmin(uuid)
+	if err != nil {
+		return dto.UserResponseDTO{}, err
+	}
+
+	userDTO := dto.UserResponseDTO{
+		UUID:       user.UUID.String(),
+		Username:   user.Username,
+		Email:      user.Email,
+		Status:     user.Status,
+		LastActive: safeTimeFormat(user.LastActive),
+		CreatedAt:  safeTimeFormat(user.CreatedAt),
+		CreatedBy:  safeStringFormat(user.CreatedBy),
+		UpdatedAt:  safeTimeFormat(user.UpdatedAt),
+		UpdatedBy:  safeStringFormat(user.UpdatedBy),
+	}
+
+	if details, ok := user.Details.(entity.SchoolAdminDetails); ok {
+		userDTO.Details = dto.SchoolAdminDetailsResponseDTO{
+			SchoolUUID: details.SchoolUUID.String(),
+			SchoolName: school.Name,
+			Picture:    details.Picture,
+			FirstName:  details.FirstName,
+			LastName:   details.LastName,
+			Gender:     dto.Gender(details.Gender),
+			Phone:      details.Phone,
+			Address:    details.Address,
+		}
+	}
+
+	return userDTO, nil
+}
+
+func (service *UserService) GetAllDriverFromAllSchools(page int, limit int, sortField string, sortDirection string) ([]dto.UserResponseDTO, int, error) {
+	offset := (page - 1) * limit
+
+	users, school, vehicle, err := service.userRepository.FetchAllDrivers(offset, limit, sortField, sortDirection)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	total, err := service.userRepository.CountSchoolAdmin()
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var usersDTO []dto.UserResponseDTO
+
+	for _, user := range users {
+		userDTO := dto.UserResponseDTO{
+			UUID:       user.UUID.String(),
+			Username:   user.Username,
+			Email:      user.Email,
+			Status:     user.Status,
+			LastActive: safeTimeFormat(user.LastActive),
+			CreatedAt:  safeTimeFormat(user.CreatedAt),
+		}
+		if details, ok := user.Details.(entity.DriverDetails); ok {
+			var vehicleDetails string
+			if vehicle.VehicleNumber == "N/A" || vehicle.UUID == uuid.Nil {
+				vehicleDetails = "N/A"
+			} else {
+				vehicleDetails = fmt.Sprintf("%s (%s)", vehicle.VehicleNumber, vehicle.VehicleName)
+			}
+
+			userDTO.Details = dto.DriverDetailsResponseDTO{
+				SchoolName:    school.Name,
+				VehicleNumber: vehicleDetails,
+				Picture:       details.Picture,
+				FirstName:     details.FirstName,
+				LastName:      details.LastName,
+				Gender:        dto.Gender(details.Gender),
+				Phone:         details.Phone,
+				Address:       details.Address,
+				LicenseNumber: details.LicenseNumber,
+			}
+		}
+		usersDTO = append(usersDTO, userDTO)
+	}
+
+	return usersDTO, total, nil
+}
+
+func (service *UserService) GetAllDriverForPermittedSchool(page int, limit int, sortField string, sortDirection string, schoolUUID string) ([]dto.UserResponseDTO, int, error) {
+	offset := (page - 1) * limit
+
+	users, school, vehicle, err := service.userRepository.FetchAllDriversForPermittedSchool(offset, limit, sortField, sortDirection, schoolUUID)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	total, err := service.userRepository.CountSchoolAdmin()
+	if err != nil {
+		return nil, 0, err
+	}
+
+	var usersDTO []dto.UserResponseDTO
+
+	for _, user := range users {
+		userDTO := dto.UserResponseDTO{
+			UUID:       user.UUID.String(),
+			Username:   user.Username,
+			Email:      user.Email,
+			Status:     user.Status,
+			LastActive: safeTimeFormat(user.LastActive),
+			CreatedAt:  safeTimeFormat(user.CreatedAt),
+		}
+		if details, ok := user.Details.(entity.DriverDetails); ok {
+			userDTO.Details = dto.DriverDetailsResponseDTO{
+				SchoolName:    school.Name,
+				VehicleNumber: vehicle.VehicleNumber,
+				Picture:       details.Picture,
+				FirstName:     details.FirstName,
+				LastName:      details.LastName,
+				Gender:        dto.Gender(details.Gender),
+				Phone:         details.Phone,
+				Address:       details.Address,
+				LicenseNumber: details.LicenseNumber,
+			}
+		}
+		usersDTO = append(usersDTO, userDTO)
+	}
+
+	return usersDTO, total, nil
+}
+
+func (service *UserService) GetSpecUserWithDetails(id string) (entity.User, error) {
+	user, err := service.userRepository.FetchSpecificUser(id)
+	if err != nil {
+		return entity.User{}, err
+	}
+	switch user.RoleCode {
+	case "SA":
+		superAdminDetails, err := service.userRepository.FetchSuperAdminDetails(user.UUID)
+		if err != nil {
+			return entity.User{}, err
+		}
+		user.Details = superAdminDetails
+		return user, nil
+	case "AS":
+		schoolAdminDetails, err := service.userRepository.FetchSchoolAdminDetails(user.UUID)
+		if err != nil {
+			return entity.User{}, err
+		}
+		user.Details = schoolAdminDetails
+		return user, nil
+	case "P":
+		parentDetails, err := service.userRepository.FetchParentDetails(user.UUID)
+		if err != nil {
+			return entity.User{}, err
+		}
+		user.Details = parentDetails
+		return user, nil
+	case "D":
+		driverDetails, err := service.userRepository.FetchDriverDetails(user.UUID)
+		if err != nil {
+			return entity.User{}, err
+		}
+		user.Details = driverDetails
+		return user, nil
+	default:
+		return entity.User{}, errors.New("invalid role code", 0)
+	}
+}
+
+func (service *UserService) GetSpecUser(id string) (entity.User, error) {
+	db, err := databases.PostgresConnection()
+	if err != nil {
+		return entity.User{}, err
+	}
+
+	idInt, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return entity.User{}, errors.New("invalid user id", 0)
+	}
+
+	var user entity.User
+	query := `
+		SELECT * FROM users WHERE user_id = $1
+	`
+
+	err = db.Get(&user, query, idInt)
+	if err != nil {
+		return entity.User{}, err
 	}
 
 	return user, nil
 }
 
-func GetAllSuperAdmin() ([]models.UserResponse, error) {
-	client, err := database.MongoConnection()
+func (service *UserService) CheckPermittedSchoolAccess(userUUID string) (string, error) {
+	schoolUUID, err := service.userRepository.FetchPermittedSchoolAccess(userUUID)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 
-	var users []models.UserResponse
-
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	cursor, err := collection.Find(context.Background(), bson.M{"role": models.SuperAdmin})
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(context.Background())
-
-	for cursor.Next(context.Background()) {
-		var user models.UserResponse
-		if err := cursor.Decode(&user); err != nil {
-			return nil, err
-		}
-		users = append(users, user)
-	}
-
-	if err := cursor.Err(); err != nil {
-		return nil, err
-	}
-
-	return users, nil
+	return schoolUUID, nil
 }
 
-func GetSpecSuperAdmin(id string) (models.UserResponse, error) {
-	client, err := database.MongoConnection()
+func (s *UserService) AddUser(req dto.UserRequestsDTO, user_name string) (uuid.UUID, error) {
+	exists, err := s.userRepository.CheckEmailExist("", req.Email)
 	if err != nil {
-		return models.UserResponse{}, err
+		return uuid.Nil, err
+	}
+	if exists {
+		return uuid.Nil, errors.New("email already exists", 409)
 	}
 
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	var user models.UserResponse
-	objectID, err := primitive.ObjectIDFromHex(id)
+	exists, err = s.userRepository.CheckUsernameExist("", req.Username)
 	if err != nil {
-		return user, err
+		return uuid.Nil, err
+	}
+	if exists {
+		return uuid.Nil, errors.New("username already exists", 409)
 	}
 
-	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
-	if err != nil {
-		return models.UserResponse{}, err
-	}
-
-	return user, nil
-}
-
-func GetAllSchoolAdmin() ([]models.UserResponse, error) {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return nil, err
-	}
-
-	var users []models.UserResponse
-
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	pipeline := mongo.Pipeline{
-		{
-			{Key: "$match", Value: bson.D{
-				{Key: "role", Value: models.SchoolAdmin},
-			}},
-		},
-		{
-			{Key: "$lookup", Value: bson.D{
-				{Key: "from", Value: "schools"},
-				{Key: "localField", Value: "details.school_id"},
-				{Key: "foreignField", Value: "_id"},
-				{Key: "as", Value: "school_details"},
-			}},
-		},
-		{
-			{Key: "$unwind", Value: bson.D{
-				{Key: "path", Value: "$school_details"},
-				{Key: "preserveNullAndEmptyArrays", Value: true},
-			}},
-		},
-		{
-			{Key: "$project", Value: bson.D{
-				{Key: "id", Value: "$_id"},
-				{Key: "picture", Value: 1},
-				{Key: "first_name", Value: 1},
-				{Key: "last_name", Value: 1},
-				{Key: "gender", Value: 1},
-				{Key: "email", Value: 1},
-				{Key: "role", Value: 1},
-				{Key: "role_code", Value: 1},
-				{Key: "phone", Value: 1},
-				{Key: "address", Value: 1},
-				{Key: "status", Value: 1},
-				{Key: "last_active", Value: 1},
-				{Key: "details", Value: bson.D{
-					{Key: "school_name", Value: bson.M{"$ifNull": []interface{}{"$school_details.name", ""}}},
-				}},
-				{Key: "created_at", Value: 1},
-				{Key: "created_by", Value: 1},
-				{Key: "updated_at", Value: 1},
-				{Key: "updated_by", Value: 1},
-			}},
-		},
-	}	
-
-	cursor, err := collection.Aggregate(context.Background(), pipeline)
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(context.Background())
-
-	for cursor.Next(context.Background()) {
-		var user models.UserResponse
-		if err := cursor.Decode(&user); err != nil {
-			return nil, err
+	if req.Password != "" {
+		hashedPassword, err := hashPassword(req.Password)
+		if err != nil {
+			return uuid.Nil, err
 		}
-		if details, ok := user.Details.(primitive.D); ok {
-			detailsMap := make(map[string]interface{})
-			for _, elem := range details {
-				detailsMap[elem.Key] = elem.Value
-			}
-			user.Details = detailsMap
+		req.Password = hashedPassword
+	}
+
+	tx, err := s.userRepository.BeginTransaction()
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("error beginning transaction: %w", err)
+	}
+
+	var transactionErr error
+	defer func() {
+		if transactionErr != nil {
+			tx.Rollback()
+		} else {
+			transactionErr = tx.Commit()
 		}
-		users = append(users, user)
+	}()
+
+	userEntity := entity.User{
+		ID:        time.Now().UnixMilli()*1e6 + int64(uuid.New().ID()%1e6),
+		UUID:      uuid.New(),
+		Username:  req.Username,
+		Email:     req.Email,
+		Password:  req.Password,
+		Role:      entity.Role(req.Role),
+		RoleCode:  req.RoleCode,
+		CreatedBy: sql.NullString{String: user_name, Valid: user_name != ""},
+		Details:   req.Details,
 	}
 
-	if err := cursor.Err(); err != nil {
-		return nil, err
-	}
-
-	return users, nil
-}
-
-func GetSpecSchoolAdmin(id string) (models.UserResponse, error) {
-	client, err := database.MongoConnection()
+	userUUID, err := s.userRepository.SaveUser(tx, userEntity)
 	if err != nil {
-		return models.UserResponse{}, err
-	}
-
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	var user models.UserResponse
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return user, err
-	}
-
-	pipeline := mongo.Pipeline{
-		{
-			{Key: "$match", Value: bson.D{
-				{Key: "_id", Value: objectID},
-				{Key: "role", Value: models.SchoolAdmin},
-			}},
-		},
-		{
-			{Key: "$lookup", Value: bson.D{
-				{Key: "from", Value: "schools"},
-				{Key: "localField", Value: "details.school_id"},
-				{Key: "foreignField", Value: "_id"},
-				{Key: "as", Value: "school_details"},
-			}},
-		},
-		{
-			{Key: "$unwind", Value: bson.D{
-				{Key: "path", Value: "$school_details"},
-				{Key: "preserveNullAndEmptyArrays", Value: true},
-			}},
-		},
-		{
-			{Key: "$project", Value: bson.D{
-				{Key: "id", Value: "$_id"},
-				{Key: "picture", Value: 1},
-				{Key: "first_name", Value: 1},
-				{Key: "last_name", Value: 1},
-				{Key: "gender", Value: 1},
-				{Key: "email", Value: 1},
-				{Key: "role", Value: 1},
-				{Key: "role_code", Value: 1},
-				{Key: "phone", Value: 1},
-				{Key: "address", Value: 1},
-				{Key: "status", Value: 1},
-				{Key: "last_active", Value: 1},
-				{Key: "details", Value: bson.D{
-					{Key: "school_id", Value: "$details.school_id"},
-					{Key: "school_name", Value: bson.M{"$ifNull": []interface{}{"$school_details.name", ""}}},
-				}},
-				{Key: "created_at", Value: 1},
-				{Key: "created_by", Value: 1},
-				{Key: "updated_at", Value: 1},
-				{Key: "updated_by", Value: 1},
-			}},
-		},
-	}
-	
-	cursor, err := collection.Aggregate(context.Background(), pipeline)
-	if err != nil {
-		return models.UserResponse{}, err
-	}
-	defer cursor.Close(context.Background())
-
-	for cursor.Next(context.Background()) {
-		if err := cursor.Decode(&user); err != nil {
-			return models.UserResponse{}, err
+		if customErr, ok := err.(*errors.CustomError); ok {
+			return uuid.Nil, errors.New(customErr.Message, customErr.StatusCode)
 		}
-		if details, ok := user.Details.(primitive.D); ok {
-			detailsMap := make(map[string]interface{})
-			for _, elem := range details {
-				detailsMap[elem.Key] = elem.Value
-			}
-			user.Details = detailsMap
-		}
+		transactionErr = fmt.Errorf("error saving user: %w", err)
+		return uuid.Nil, transactionErr
 	}
 
-	if err := cursor.Err(); err != nil {
-		return models.UserResponse{}, err
-	}
-
-	return user, nil
-}
-
-func GetAllDriverFromAllSchools() ([]models.UserResponse, error) {
-    client, err := database.MongoConnection()
-    if err != nil {
-        return nil, err
-    }
-
-    var users []models.UserResponse
-    collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-    pipeline := mongo.Pipeline{
-		{
-			{Key: "$match", Value: bson.D{
-				{Key: "role", Value: models.Driver},
-			}},
-		},
-		{
-			{Key: "$lookup", Value: bson.D{
-				{Key: "from", Value: "schools"},
-				{Key: "localField", Value: "details.school_id"},
-				{Key: "foreignField", Value: "_id"},
-				{Key: "as", Value: "school_details"},
-			}},
-		},
-		{
-			{Key: "$unwind", Value: bson.D{
-				{Key: "path", Value: "$school_details"},
-				{Key: "preserveNullAndEmptyArrays", Value: true},
-			}},
-		},
-		{
-			{Key: "$lookup", Value: bson.D{
-				{Key: "from", Value: "vehicles"},
-				{Key: "localField", Value: "details.vehicle_id"},
-				{Key: "foreignField", Value: "_id"},
-				{Key: "as", Value: "vehicle_details"},
-			}},
-		},
-		{
-			{Key: "$unwind", Value: bson.D{
-				{Key: "path", Value: "$vehicle_details"},
-				{Key: "preserveNullAndEmptyArrays", Value: true},
-			}},
-		},
-		{
-			{Key: "$project", Value: bson.D{
-				{Key: "id", Value: "$_id"},
-				{Key: "picture", Value: 1},
-				{Key: "first_name", Value: 1},
-				{Key: "last_name", Value: 1},
-				{Key: "gender", Value: 1},
-				{Key: "email", Value: 1},
-				{Key: "role", Value: 1},
-				{Key: "role_code", Value: 1},
-				{Key: "phone", Value: 1},
-				{Key: "address", Value: 1},
-				{Key: "status", Value: 1},
-				{Key: "details", Value: bson.D{
-					{Key: "license_number", Value: "$details.license_number"},
-					{Key: "school_name", Value: bson.M{"$ifNull": []interface{}{"$school_details.name", ""}}},
-					{Key: "vehicle_name", Value: bson.M{"$ifNull": []interface{}{"$vehicle_details.name", ""}}},
-				}},
-				{Key: "created_at", Value: 1},
-				{Key: "created_by", Value: 1},
-				{Key: "updated_at", Value: 1},
-				{Key: "updated_by", Value: 1},
-			}},
-		},
-	}
-
-	cursor, err := collection.Aggregate(context.Background(), pipeline)
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(context.Background())
-
-	for cursor.Next(context.Background()) {
-		var user models.UserResponse
-		if err := cursor.Decode(&user); err != nil {
-			return nil, err
-		}
-		if details, ok := user.Details.(primitive.D); ok {
-			detailsMap := make(map[string]interface{})
-			for _, elem := range details {
-				detailsMap[elem.Key] = elem.Value
-			}
-			user.Details = detailsMap
-		}
-		users = append(users, user)
-	}
-
-	if err := cursor.Err(); err != nil {
-		return nil, err
-	}
-
-	return users, nil
-}
-
-func GetAllDriverForPermittedSchool(schoolID primitive.ObjectID) ([]models.UserResponse, error) {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return nil, err
-	}
-
-	var users []models.UserResponse
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	pipeline := mongo.Pipeline{
-		{
-			{Key: "$match", Value: bson.D{
-				{Key: "role", Value: models.Driver},
-				{Key: "details.school_id", Value: schoolID},
-			}},
-		},
-		{
-			{Key: "$lookup", Value: bson.D{
-				{Key: "from", Value: "schools"},
-				{Key: "localField", Value: "details.school_id"},
-				{Key: "foreignField", Value: "_id"},
-				{Key: "as", Value: "school_details"},
-			}},
-		},
-		{
-			{Key: "$unwind", Value: bson.D{
-				{Key: "path", Value: "$school_details"},
-				{Key: "preserveNullAndEmptyArrays", Value: true},
-			}},
-		},
-		{
-			{Key: "$lookup", Value: bson.D{
-				{Key: "from", Value: "vehicles"},
-				{Key: "localField", Value: "details.vehicle_id"},
-				{Key: "foreignField", Value: "_id"},
-				{Key: "as", Value: "vehicle_details"},
-			}},
-		},
-		{
-			{Key: "$unwind", Value: bson.D{
-				{Key: "path", Value: "$vehicle_details"},
-				{Key: "preserveNullAndEmptyArrays", Value: true},
-			}},
-		},
-		{
-			{Key: "$project", Value: bson.D{
-				{Key: "id", Value: "$_id"},
-				{Key: "picture", Value: 1},
-				{Key: "first_name", Value: 1},
-				{Key: "last_name", Value: 1},
-				{Key: "gender", Value: 1},
-				{Key: "email", Value: 1},
-				{Key: "role", Value: 1},
-				{Key: "role_code", Value: 1},
-				{Key: "phone", Value: 1},
-				{Key: "address", Value: 1},
-				{Key: "status", Value: 1},
-				{Key: "details", Value: bson.D{
-					{Key: "license_number", Value: "$details.license_number"},
-					{Key: "school_name", Value: bson.M{"$ifNull": []interface{}{"$school_details.name", ""}}},
-					{Key: "vehicle_name", Value: bson.M{"$ifNull": []interface{}{"$vehicle_details.name", ""}}},
-				}},
-				{Key: "created_at", Value: 1},
-				{Key: "created_by", Value: 1},
-				{Key: "updated_at", Value: 1},
-				{Key: "updated_by", Value: 1},
-			}},
-		},
-	}
-
-	cursor, err := collection.Aggregate(context.Background(), pipeline)
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(context.Background())
-
-	for cursor.Next(context.Background()) {
-		var user models.UserResponse
-		if err := cursor.Decode(&user); err != nil {
-			return nil, err
-		}
-		if details, ok := user.Details.(primitive.D); ok {
-			detailsMap := make(map[string]interface{})
-			for _, elem := range details {
-				detailsMap[elem.Key] = elem.Value
-			}
-			user.Details = detailsMap
-		}
-		users = append(users, user)
-	}
-
-	if err := cursor.Err(); err != nil {
-		return nil, err
-	}
-
-	return users, nil
-}
-
-func GetSpecDriverFromAllSchools(id string) (models.UserResponse, error) {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return models.UserResponse{}, err
-	}
-
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	var user models.UserResponse
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return user, err
-	}
-
-	pipeline := mongo.Pipeline{
-		{
-			{Key: "$match", Value: bson.D{
-				{Key: "_id", Value: objectID},
-				{Key: "role", Value: models.Driver},
-			}},
-		},
-		{
-			{Key: "$lookup", Value: bson.D{
-				{Key: "from", Value: "schools"},
-				{Key: "localField", Value: "details.school_id"},
-				{Key: "foreignField", Value: "_id"},
-				{Key: "as", Value: "school_details"},
-			}},
-		},
-		{
-			{Key: "$unwind", Value: bson.D{
-				{Key: "path", Value: "$school_details"},
-				{Key: "preserveNullAndEmptyArrays", Value: true},
-			}},
-		},
-		{
-			{Key: "$lookup", Value: bson.D{
-				{Key: "from", Value: "vehicles"},
-				{Key: "localField", Value: "details.vehicle_id"},
-				{Key: "foreignField", Value: "_id"},
-				{Key: "as", Value: "vehicle_details"},
-			}},
-		},
-		{
-			{Key: "$unwind", Value: bson.D{
-				{Key: "path", Value: "$vehicle_details"},
-				{Key: "preserveNullAndEmptyArrays", Value: true},
-			}},
-		},
-		{
-			{Key: "$project", Value: bson.D{
-				{Key: "id", Value: "$_id"},
-				{Key: "picture", Value: 1},
-				{Key: "first_name", Value: 1},
-				{Key: "last_name", Value: 1},
-				{Key: "gender", Value: 1},
-				{Key: "email", Value: 1},
-				{Key: "role", Value: 1},
-				{Key: "role_code", Value: 1},
-				{Key: "phone", Value: 1},
-				{Key: "address", Value: 1},
-				{Key: "status", Value: 1},
-				{Key: "details", Value: bson.D{
-					{Key: "license_number", Value: "$details.license_number"},
-					{Key: "school_id", Value: "$details.school_id"},
-					{Key: "school_name", Value: bson.M{"$ifNull": []interface{}{"$school_details.name", ""}}},
-					{Key: "vehicle_id", Value: "$details.vehicle_id"},
-					{Key: "vehicle_name", Value: bson.M{"$ifNull": []interface{}{"$vehicle_details.name", ""}}},
-				}},
-				{Key: "created_at", Value: 1},
-				{Key: "created_by", Value: 1},
-				{Key: "updated_at", Value: 1},
-				{Key: "updated_by", Value: 1},
-			}},
-		},
-	}
-
-	cursor, err := collection.Aggregate(context.Background(), pipeline)
-	if err != nil {
-		return models.UserResponse{}, err
-	}
-	defer cursor.Close(context.Background())
-
-	if cursor.Next(context.Background()) {
-		if err := cursor.Decode(&user); err != nil {
-			return models.UserResponse{}, err
-		}
-
-		if details, ok := user.Details.(bson.D); ok {
-			detailsMap := make(map[string]interface{})
-			for _, elem := range details {
-				detailsMap[elem.Key] = elem.Value
-			}
-			user.Details = detailsMap
+	if _, ok := req.Details.(map[string]interface{}); ok {
+		if err := s.saveRoleDetails(tx, userEntity, req); err != nil {
+			transactionErr = fmt.Errorf("error saving role details: %w", err)
+			return uuid.Nil, transactionErr
 		}
 	} else {
-		return models.UserResponse{}, err
-	}
-
-	if err := cursor.Err(); err != nil {
-		return models.UserResponse{}, err
-	}
-
-	return user, nil
-}
-
-func GetSpecDriverForPermittedSchool(id string, schoolID primitive.ObjectID) (models.UserResponse, error) {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return models.UserResponse{}, err
-	}
-
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	var user models.UserResponse
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return user, err
-	}
-
-	pipeline := mongo.Pipeline{
-		{
-			{Key: "$match", Value: bson.D{
-				{Key: "_id", Value: objectID},
-				{Key: "role", Value: models.Driver},
-				{Key: "details.school_id", Value: schoolID},
-			}},
-		},
-		{
-			{Key: "$lookup", Value: bson.D{
-				{Key: "from", Value: "schools"},
-				{Key: "localField", Value: "details.school_id"},
-				{Key: "foreignField", Value: "_id"},
-				{Key: "as", Value: "school_details"},
-			}},
-		},
-		{
-			{Key: "$unwind", Value: bson.D{
-				{Key: "path", Value: "$school_details"},
-				{Key: "preserveNullAndEmptyArrays", Value: true},
-			}},
-		},
-		{
-			{Key: "$lookup", Value: bson.D{
-				{Key: "from", Value: "vehicles"},
-				{Key: "localField", Value: "details.vehicle_id"},
-				{Key: "foreignField", Value: "_id"},
-				{Key: "as", Value: "vehicle_details"},
-			}},
-		},
-		{
-			{Key: "$unwind", Value: bson.D{
-				{Key: "path", Value: "$vehicle_details"},
-				{Key: "preserveNullAndEmptyArrays", Value: true},
-			}},
-		},
-		{
-			{Key: "$project", Value: bson.D{
-				{Key: "id", Value: "$_id"},
-				{Key: "picture", Value: 1},
-				{Key: "first_name", Value: 1},
-				{Key: "last_name", Value: 1},
-				{Key: "gender", Value: 1},
-				{Key: "email", Value: 1},
-				{Key: "role", Value: 1},
-				{Key: "role_code", Value: 1},
-				{Key: "phone", Value: 1},
-				{Key: "address", Value: 1},
-				{Key: "status", Value: 1},
-				{Key: "details", Value: bson.D{
-					{Key: "license_number", Value: "$details.license_number"},
-					{Key: "school_name", Value: bson.M{"$ifNull": []interface{}{"$school_details.name", ""}}},
-					{Key: "vehicle_id", Value: "$details.vehicle_id"},
-					{Key: "vehicle_name", Value: bson.M{"$ifNull": []interface{}{"$vehicle_details.name", ""}}},
-				}},
-				{Key: "created_at", Value: 1},
-				{Key: "created_by", Value: 1},
-				{Key: "updated_at", Value: 1},
-				{Key: "updated_by", Value: 1},
-			}},
-		},
-	}
-
-	cursor, err := collection.Aggregate(context.Background(), pipeline)
-	if err != nil {
-		return models.UserResponse{}, err
-	}
-	defer cursor.Close(context.Background())
-
-	if cursor.Next(context.Background()) {
-		if err := cursor.Decode(&user); err != nil {
-			return models.UserResponse{}, err
-		}
-
-		if details, ok := user.Details.(bson.D); ok {
-			detailsMap := make(map[string]interface{})
-			for _, elem := range details {
-				detailsMap[elem.Key] = elem.Value
+		switch userEntity.Role {
+		case entity.SchoolAdmin:
+			if details, ok := req.Details.(dto.SchoolAdminDetailsRequestsDTO); ok {
+				req.Details = details
+			} else {
+				return uuid.Nil, errors.New("invalid school admin details", 400)
 			}
-			user.Details = detailsMap
-		}
-	} else {
-		return models.UserResponse{}, err
-	}
-
-	if err := cursor.Err(); err != nil {
-		return models.UserResponse{}, err
-	}
-
-	return user, nil
-}
-
-func AddUser(user models.User, username string) (primitive.ObjectID, error) {
-    client, err := database.MongoConnection()
-    if err != nil {
-        return primitive.NilObjectID, err
-    }
-
-    collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-    if err := validateCommonFields(user); err != nil {
-        return primitive.NilObjectID, err
-    }
-
-	if len(user.Password) < 8 {
-		return primitive.NilObjectID, errors.New("password must be at least 8 characters", 400)
-	}
-
-    if user.Password != "" {
-        hashedPassword, err := hashPassword(user.Password)
-        if err != nil {
-            return primitive.NilObjectID, err
-        }
-        user.Password = hashedPassword
-    }
-
-    var existingUser models.User
-    err = collection.FindOne(context.Background(), bson.M{"email": user.Email}).Decode(&existingUser)
-    if err == nil {
-        return primitive.NilObjectID, errors.New("email already exists", 409)
-    }
-
-    user.CreatedAt = time.Now()
-    user.CreatedBy = username
-    user.Status = "offline"
-
-    if err := processRoleDetails(&user); err != nil {
-        return primitive.NilObjectID, err
-    }
-
-    result, err := collection.InsertOne(context.Background(), user)
-    if err != nil {
-        return primitive.NilObjectID, err
-    }
-
-    return result.InsertedID.(primitive.ObjectID), nil
-}
-
-func UpdateUser(id string, user models.User, username string, file []byte) error {
-    client, err := database.MongoConnection()
-    if err != nil {
-        return err
-    }
-
-    collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-    objectID, err := primitive.ObjectIDFromHex(id)
-    if err != nil {
-        return err
-    }
-
-    if err := validateCommonFields(user); err != nil {
-        return err
-    }
-
-    updateFields := bson.M{
-		"picture":    user.Picture,
-        "first_name": user.FirstName,
-        "last_name":  user.LastName,
-		"gender":     user.Gender,
-        "email":      user.Email,
-        "role":       user.Role,
-		"phone":      user.Phone,
-		"address":    user.Address,
-		"updated_at": time.Now(),
-		"updated_by": username,
-    }
-
-    if err := processRoleDetails(&user); err != nil {
-        return err
-    }
-
-    updateFields["details"] = user.Details
-
-    _, err = collection.UpdateOne(
-        context.Background(),
-        bson.M{"_id": objectID},
-        bson.M{"$set": updateFields},
-    )
-
-    return err
-}
-
-func processRoleDetails(user *models.User) error {
-    switch user.Role {
-	case models.SuperAdmin:
-		user.RoleCode = "SA"
-    case models.SchoolAdmin:
-        if user.Details == nil {
-            return errors.New("SchoolAdmin details are required", 400)
-        }
-
-        schoolAdminDetails, ok := user.Details.(map[string]interface{})
-        if !ok {
-            return errors.New("invalid details format for SchoolAdmin", 400)
-        }
-
-        schoolID, ok := schoolAdminDetails["school_id"].(string)
-        if !ok {
-            return errors.New("school_id is required for SchoolAdmin", 400)
-        }
-
-        schoolObjectID, err := primitive.ObjectIDFromHex(schoolID)
-        if err != nil {
-            return errors.New("invalid school_id format", 400)
-        }
-
-        user.Details = models.SchoolAdminDetails{SchoolID: schoolObjectID}
-        _, err = GetSpecSchool(schoolObjectID.Hex())
-        if err != nil {
-            return errors.New("school not found", 400)
-        }
-		user.RoleCode = "AS"
-    case models.Parent:
-        if user.Details == nil {
-            return errors.New("parent details are required", 400)
-        }
-		user.RoleCode = "P"
-	case models.Driver:
-		if user.Details == nil {
-			return errors.New("driver details are required", 400)
-		}
-	
-		driverDetails, ok := user.Details.(map[string]interface{})
-		if !ok {
-			return errors.New("invalid details format for Driver", 400)
-		}
-	
-		licenseNumber, ok := driverDetails["license_number"].(string)
-		if !ok || len(licenseNumber) == 0 {
-			return errors.New("license number is required for Driver", 400)
-		}
-	
-		vehicleID, ok := driverDetails["vehicle_id"].(string)
-		if !ok {
-			vehicleID = ""
-		}
-	
-		if vehicleID != "" {
-			vehicleObjectID, err := primitive.ObjectIDFromHex(vehicleID)
-			if err != nil {
-				return errors.New("invalid vehicle_id format", 400)
+		case entity.Driver:
+			if details, ok := req.Details.(dto.DriverDetailsRequestsDTO); ok {
+				req.Details = details
+			} else {
+				return uuid.Nil, errors.New("invalid driver details", 400)
 			}
-			_, err = GetSpecVehicle(vehicleObjectID.Hex())
-			if err != nil {
-				return errors.New("vehicle not found", 400)
-			}
-			driverDetails["vehicle_id"] = vehicleObjectID
+		}
+
+		if err := s.saveRoleDetails(tx, userEntity, req); err != nil {
+			transactionErr = fmt.Errorf("error saving role details: %w", err)
+			return uuid.Nil, transactionErr
+		}
+	}
+
+	return userUUID, nil
+}
+
+func (s *UserService) UpdateUser(id string, req dto.UserRequestsDTO, username string, detailsMap map[string]interface{}, file []byte) error {
+	tx, err := s.userRepository.BeginTransaction()
+	if err != nil {
+		return fmt.Errorf("error beginning transaction: %w", err)
+	}
+
+	defer func() {
+		if err != nil {
+			tx.Rollback()
 		} else {
-			driverDetails["vehicle_id"] = nil
+			err = tx.Commit()
 		}
-	
-		schoolID, ok := driverDetails["school_id"].(string)
-		if !ok {
-			schoolID = ""
+	}()
+
+	exists, err := s.userRepository.CheckEmailExist(id, req.Email)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return errors.New("email already exists", 409)
+	}
+
+	exists, err = s.userRepository.CheckUsernameExist(id, req.Username)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return errors.New("username already exists", 409)
+	}
+
+	userData := entity.User{
+		Username:  req.Username,
+		Email:     req.Email,
+		Role:      entity.Role(req.Role),
+		RoleCode:  req.RoleCode,
+		Details:   detailsMap,
+		UpdatedBy: sql.NullString{String: username, Valid: username != ""},
+	}
+
+	if err := s.userRepository.UpdateUser(tx, userData, id); err != nil {
+		return err
+	}
+
+	if _, ok := userData.Details.(map[string]interface{}); ok {
+		if err := s.updateRoleDetails(tx, userData, req, id); err != nil {
+			logger.LogError(err, "error saving role details", map[string]interface{}{})
+			return fmt.Errorf("error saving role details: %w", err)
 		}
-	
-		if schoolID != "" {
-			schoolObjectID, err := primitive.ObjectIDFromHex(schoolID)
-			if err != nil {
-				return errors.New("invalid school_id format", 400)
-			}
-			_, err = GetSpecSchool(schoolObjectID.Hex())
-			if err != nil {
-				return errors.New("school not found", 400)
-			}
-			driverDetails["school_id"] = schoolObjectID
-		} else {
-			driverDetails["school_id"] = nil
-		}
-	
-		var vehicleObjectID, schoolObjectID primitive.ObjectID
-		if driverDetails["vehicle_id"] != nil {
-			vehicleObjectID = driverDetails["vehicle_id"].(primitive.ObjectID)
-		}
-		if driverDetails["school_id"] != nil {
-			schoolObjectID = driverDetails["school_id"].(primitive.ObjectID)
-		}
-	
-		user.Details = models.DriverDetails{
-			LicenseNumber: licenseNumber,
-			SchoolID:      schoolObjectID,
-			VehicleID:     vehicleObjectID,
-		}
-		user.RoleCode = "D"	
-    default:
-        return errors.New("invalid role specified", 400)
-    }
-    return nil
+	}
+
+	return nil
 }
 
 func DeleteUser(id string) error {
-	client, err := database.MongoConnection()
+	client, err := databases.MongoConnection()
 	if err != nil {
 		return err
 	}
@@ -879,7 +519,7 @@ func DeleteUser(id string) error {
 		return err
 	}
 
-	var user models.User
+	var user entity.User
 	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
 	if err != nil {
 		return err
@@ -893,88 +533,145 @@ func DeleteUser(id string) error {
 	return nil
 }
 
-func DeleteSchoolDriver(id string, schoolID primitive.ObjectID) error {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return err
-	}
+func (s *UserService) saveRoleDetails(tx *sqlx.Tx, userEntity entity.User, req dto.UserRequestsDTO) error {
+	var params interface{}
 
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return err
-	}
-
-	var user models.User
-	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
-	if err != nil {
-		return err
-	}
-
-	if details, ok := user.Details.(map[string]interface{}); ok {
-		if details["school_id"].(primitive.ObjectID).Hex() != schoolID.Hex() {
-			return errors.New("driver does not belong to this school", 400)
+	switch userEntity.Role {
+	case entity.SuperAdmin:
+		details := entity.SuperAdminDetails{
+			Picture:   req.Picture,
+			FirstName: req.FirstName,
+			LastName:  req.LastName,
+			Gender:    entity.Gender(req.Gender),
+			Phone:     req.Phone,
+			Address:   req.Address,
 		}
-	}
 
-	_, err = collection.DeleteOne(context.Background(), bson.M{"_id": objectID})
-	if err != nil {
-		return err
-	}
+		if err := s.userRepository.SaveSuperAdminDetails(tx, details, userEntity.UUID, params); err != nil {
+			return err
+		}
+	case entity.SchoolAdmin:
+		details := entity.SchoolAdminDetails{
+			SchoolUUID: uuid.MustParse(req.Details.(dto.SchoolAdminDetailsRequestsDTO).SchoolID),
+			Picture:    req.Picture,
+			FirstName:  req.FirstName,
+			LastName:   req.LastName,
+			Gender:     entity.Gender(req.Gender),
+			Phone:      req.Phone,
+			Address:    req.Address,
+		}
 
-	return nil
-}
+		if err := s.userRepository.SaveSchoolAdminDetails(tx, details, userEntity.UUID, params); err != nil {
+			return err
+		}
+	case entity.Parent:
+		details := entity.ParentDetails{
+			Picture:   req.Picture,
+			FirstName: req.FirstName,
+			LastName:  req.LastName,
+			Gender:    entity.Gender(req.Gender),
+			Phone:     req.Phone,
+			Address:   req.Address,
+		}
 
-func UpdateUserStatus(userID primitive.ObjectID, status string, lastActive time.Time) error {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return err
-	}
+		if err := s.userRepository.SaveParentDetails(tx, details, userEntity.UUID, params); err != nil {
+			return err
+		}
+	case entity.Driver:
+		details := entity.DriverDetails{
+			SchoolUUID:    parseSafeUUID(req.Details.(dto.DriverDetailsRequestsDTO).SchoolID),
+			VehicleUUID:   parseSafeUUID(req.Details.(dto.DriverDetailsRequestsDTO).VehicleID),
+			Picture:       req.Picture,
+			FirstName:     req.FirstName,
+			LastName:      req.LastName,
+			Gender:        entity.Gender(req.Gender),
+			Phone:         req.Phone,
+			Address:       req.Address,
+			LicenseNumber: req.Details.(dto.DriverDetailsRequestsDTO).LicenseNumber,
+		}
 
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	update := bson.M{
-		"$set": bson.M{
-			"status":      status,
-			"last_active": lastActive,
-		},
-	}
-
-	_, err = collection.UpdateOne(context.Background(), bson.M{"_id": userID}, update)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func validateCommonFields(user models.User) error {
-	validRoles := map[models.Role]bool{
-		models.SuperAdmin:  true,
-		models.SchoolAdmin: true,
-		models.Parent:      true,
-		models.Driver:      true,
-	}
-	if !validRoles[models.Role(strings.ToLower(string(user.Role)))] {
+		if err := s.userRepository.SaveDriverDetails(tx, details, userEntity.UUID, params); err != nil {
+			return err
+		}
+	default:
 		return errors.New("invalid role", 400)
 	}
 
-	validGender := map[models.Gender]bool{
-		models.Female: true,
-		models.Male:   true,
-	}
-	if !validGender[models.Gender(strings.ToLower(string(user.Gender)))] {
-		return errors.New("invalid gender", 400)
-	}
-
-	if len(user.Phone) < 12 || len(user.Phone) > 15 {
-		return errors.New("phone number must be between 12 and 15 characters", 400)
-	}
-
-	_, err := mail.ParseAddress(user.Email)
-	if err != nil {
-		return errors.New("invalid email format", 400)
-	}
 	return nil
+}
+
+func (s *UserService) updateRoleDetails(tx *sqlx.Tx, userEntity entity.User, req dto.UserRequestsDTO, id string) error {
+	switch userEntity.Role {
+	case entity.SuperAdmin:
+		details := entity.SuperAdminDetails{
+			Picture:   req.Picture,
+			FirstName: req.FirstName,
+			LastName:  req.LastName,
+			Gender:    entity.Gender(req.Gender),
+			Phone:     req.Phone,
+			Address:   req.Address,
+		}
+
+		if err := s.userRepository.UpdateSuperAdminDetails(tx, details, id); err != nil {
+			return err
+		}
+	case entity.SchoolAdmin:
+		details := entity.SchoolAdminDetails{
+			SchoolUUID: *parseSafeUUID(req.Details.(dto.SchoolAdminDetailsRequestsDTO).SchoolID),
+			Picture:    req.Picture,
+			FirstName:  req.FirstName,
+			LastName:   req.LastName,
+			Gender:     entity.Gender(req.Gender),
+			Phone:      req.Phone,
+			Address:    req.Address,
+		}
+
+		if err := s.userRepository.UpdateSchoolAdminDetails(tx, details, id); err != nil {
+			return err
+		}
+	case entity.Parent:
+		details := entity.ParentDetails{
+			Picture:   req.Picture,
+			FirstName: req.FirstName,
+			LastName:  req.LastName,
+			Gender:    entity.Gender(req.Gender),
+			Phone:     req.Phone,
+			Address:   req.Address,
+		}
+
+		if err := s.userRepository.UpdateParentDetails(tx, details, id); err != nil {
+			return err
+		}
+	case entity.Driver:
+		details := entity.DriverDetails{
+			SchoolUUID:    parseSafeUUID(req.Details.(dto.DriverDetailsRequestsDTO).SchoolID),
+			VehicleUUID:   parseSafeUUID(req.Details.(dto.DriverDetailsRequestsDTO).VehicleID),
+			Picture:       req.Picture,
+			FirstName:     req.FirstName,
+			LastName:      req.LastName,
+			Gender:        entity.Gender(req.Gender),
+			Phone:         req.Phone,
+			Address:       req.Address,
+			LicenseNumber: req.Details.(dto.DriverDetailsRequestsDTO).LicenseNumber,
+		}
+
+		if err := s.userRepository.UpdateDriverDetails(tx, details, id); err != nil {
+			return err
+		}
+	default:
+		return errors.New("invalid role", 400)
+	}
+
+	return nil
+}
+
+func parseSafeUUID(id string) *uuid.UUID {
+	if id == "" || id == "00000000-0000-0000-0000-000000000000" {
+		return nil
+	}
+	parsedUUID, err := uuid.Parse(id)
+	if err != nil {
+		return nil
+	}
+	return &parsedUUID
 }

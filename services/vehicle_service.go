@@ -1,82 +1,147 @@
 package services
 
 import (
-	"context"
-	"errors"
-	"shuttle/databases"
-	"shuttle/models"
+	"shuttle/models/dto"
+	"shuttle/models/entity"
+	"shuttle/repositories"
+	"time"
 
-	"github.com/spf13/viper"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
+	"github.com/google/uuid"
 )
 
-func GetAllVehicles() ([]models.Vehicle, error) {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return nil, err
-	}
-
-	var vehicles []models.Vehicle
-
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("vehicles")
-
-	cursor, err := collection.Find(context.Background(), bson.M{})
-	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(context.Background())
-
-	for cursor.Next(context.Background()) {
-		var vehicle models.Vehicle
-		if err := cursor.Decode(&vehicle); err != nil {
-			return nil, err
-		}
-		vehicles = append(vehicles, vehicle)
-	}
-
-	if err := cursor.Err(); err != nil {
-		return nil, err
-	}
-
-	return vehicles, nil
+type VehicleServiceInterface interface {
+	GetSpecVehicle(uuid string) (dto.VehicleResponseDTO, error)
+	GetAllVehicles(page, limit int, sortField, sortDirection string) ([]dto.VehicleResponseDTO, int, error)
+	AddVehicle(req dto.VehicleRequestDTO) error
+	UpdateVehicle(id string, req dto.VehicleRequestDTO, username string) error
+	DeleteVehicle(id string, username string) error
 }
 
-func GetSpecVehicle(id string) (models.Vehicle, error) {
-	var vehicle models.Vehicle
-	client, err := database.MongoConnection()
-	if err != nil {
-		return vehicle, err
-	}
-
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("vehicles")
-
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return vehicle, err
-	}
-
-	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&vehicle)
-	if err != nil {
-		if errors.Is(err, mongo.ErrNoDocuments) {
-			return vehicle, errors.New("vehicle not found")
-		}
-		return vehicle, err
-	}
-
-	return vehicle, nil
+type VehicleService struct {
+	vehicleRepository repositories.VehicleRepositoryInterface
 }
 
-func AddVehicle(vehicle models.Vehicle) error {
-	client, err := database.MongoConnection()
+func NewVehicleService(vehicleRepository repositories.VehicleRepositoryInterface) VehicleService {
+	return VehicleService{
+		vehicleRepository: vehicleRepository,
+	}
+}
+
+func (service *VehicleService) GetAllVehicles(page, limit int, sortField, sortDirection string) ([]dto.VehicleResponseDTO, int, error) {
+	offset := (page - 1) * limit
+
+	vehicles, school, driver, err := service.vehicleRepository.FetchAllVehicles(offset, limit, sortField, sortDirection)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
 
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("vehicles")
+	total, err := service.vehicleRepository.CountVehicles()
+	if err != nil {
+		return nil, 0, err
+	}
 
-	_, err = collection.InsertOne(context.Background(), vehicle)
+	var vehiclesDTO []dto.VehicleResponseDTO
+	for _, vehicle := range vehicles {
+
+		var schoolName string
+		if vehicle.SchoolUUID == nil || school[vehicle.SchoolUUID.String()].UUID == uuid.Nil {
+			schoolName = "N/A"
+		} else {
+			schoolName = school[vehicle.SchoolUUID.String()].Name
+		}
+
+		var driverName string
+		if vehicle.DriverUUID == nil || driver[vehicle.DriverUUID.String()].UserUUID == uuid.Nil {
+			driverName = "N/A"
+		} else {
+			driverName = driver[vehicle.DriverUUID.String()].FirstName + " " + driver[vehicle.DriverUUID.String()].LastName
+		}
+
+		vehiclesDTO = append(vehiclesDTO, dto.VehicleResponseDTO{
+			UUID:       vehicle.UUID.String(),
+			SchoolName: schoolName,
+			DriverName: driverName,
+			Name:       vehicle.VehicleName,
+			Number:     vehicle.VehicleNumber,
+			Type:       vehicle.VehicleType,
+			Color:      vehicle.VehicleColor,
+			Seats:      vehicle.VehicleSeats,
+			Status:     vehicle.VehicleStatus,
+			CreatedAt:  safeTimeFormat(vehicle.CreatedAt),
+		})
+	}
+
+	return vehiclesDTO, total, nil
+}
+
+func (service *VehicleService) GetSpecVehicle(uuid string) (dto.VehicleResponseDTO, error) {
+	vehicle, school, driver, err := service.vehicleRepository.FetchSpecVehicle(uuid)
+	if err != nil {
+		return dto.VehicleResponseDTO{}, err
+	}
+
+	var schoolUUID, schoolName string
+	if vehicle.SchoolUUID == nil {
+		schoolUUID = "N/A"
+		schoolName = "N/A"
+	} else if vehicle.SchoolUUID != nil {
+		schoolUUID = vehicle.SchoolUUID.String()
+		schoolName = school.Name
+	}
+
+	var driverUUID, driverName string
+	if vehicle.DriverUUID == nil {
+		driverUUID = "N/A"
+		driverName = "N/A"
+	} else if vehicle.DriverUUID != nil {
+		driverUUID = vehicle.DriverUUID.String()
+		driverName = driver.FirstName + " " + driver.LastName
+	}
+
+	vehicleDTO := dto.VehicleResponseDTO{
+		UUID:       vehicle.UUID.String(),
+		SchoolUUID: schoolUUID,
+		SchoolName: schoolName,
+		DriverUUID: driverUUID,
+		DriverName: driverName,
+		Name:       vehicle.VehicleName,
+		Number:     vehicle.VehicleNumber,
+		Type:       vehicle.VehicleType,
+		Color:      vehicle.VehicleColor,
+		Seats:      vehicle.VehicleSeats,
+		Status:     vehicle.VehicleStatus,
+		CreatedAt:  safeTimeFormat(vehicle.CreatedAt),
+		CreatedBy:  safeStringFormat(vehicle.CreatedBy),
+		UpdatedAt:  safeTimeFormat(vehicle.UpdatedAt),
+		UpdatedBy:  safeStringFormat(vehicle.UpdatedBy),
+	}
+
+	return vehicleDTO, nil
+}
+
+func (service *VehicleService) AddVehicle(req dto.VehicleRequestDTO) error {
+	vehicle := entity.Vehicle{
+		ID:            time.Now().UnixMilli()*1e6 + int64(uuid.New().ID()%1e6),
+		UUID:          uuid.New(),
+		VehicleName:   req.Name,
+		VehicleNumber: req.Number,
+		VehicleType:   req.Type,
+		VehicleColor:  req.Color,
+		VehicleSeats:  req.Seats,
+		VehicleStatus: req.Status,
+	}
+
+	if req.School != "" {
+		schoolUUID, err := uuid.Parse(req.School)
+		if err != nil {
+			return err
+		}
+		vehicle.SchoolUUID = &schoolUUID
+	} else {
+		vehicle.SchoolUUID = nil
+	}
+
+	err := service.vehicleRepository.SaveVehicle(vehicle)
 	if err != nil {
 		return err
 	}
@@ -84,20 +149,35 @@ func AddVehicle(vehicle models.Vehicle) error {
 	return nil
 }
 
-func UpdateVehicle(vehicle models.Vehicle, id string) error {
-	client, err := database.MongoConnection()
+func (service *VehicleService) UpdateVehicle(id string, req dto.VehicleRequestDTO, username string) error {
+	parsedUUID, err := uuid.Parse(id)
 	if err != nil {
 		return err
 	}
 
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return err
+	vehicle := entity.Vehicle{
+		UUID:          parsedUUID,
+		VehicleName:   req.Name,
+		VehicleNumber: req.Number,
+		VehicleType:   req.Type,
+		VehicleColor:  req.Color,
+		VehicleSeats:  req.Seats,
+		VehicleStatus: req.Status,
+		UpdatedAt:     toNullTime(time.Now()),
+		UpdatedBy:     toNullString(username),
 	}
 
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("vehicles")
+	if req.School != "" {
+		schoolUUID, err := uuid.Parse(req.School)
+		if err != nil {
+			return err
+		}
+		vehicle.SchoolUUID = &schoolUUID
+	} else {
+		vehicle.SchoolUUID = nil
+	}
 
-	_, err = collection.UpdateOne(context.Background(), bson.M{"_id": objectID}, bson.M{"$set": vehicle})
+	err = service.vehicleRepository.UpdateVehicle(vehicle)
 	if err != nil {
 		return err
 	}
@@ -105,20 +185,19 @@ func UpdateVehicle(vehicle models.Vehicle, id string) error {
 	return nil
 }
 
-func DeleteVehicle(id string) error {
-	client, err := database.MongoConnection()
+func (service *VehicleService) DeleteVehicle(id string, username string) error {
+	parsedUUID, err := uuid.Parse(id)
 	if err != nil {
 		return err
 	}
 
-	objectID, err := primitive.ObjectIDFromHex(id)
-	if err != nil {
-		return err
+	vehicle := entity.Vehicle{
+		UUID:      parsedUUID,
+		DeletedAt: toNullTime(time.Now()),
+		DeletedBy: toNullString(username),
 	}
 
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("vehicles")
-
-	_, err = collection.DeleteOne(context.Background(), bson.M{"_id": objectID})
+	err = service.vehicleRepository.DeleteVehicle(vehicle)
 	if err != nil {
 		return err
 	}

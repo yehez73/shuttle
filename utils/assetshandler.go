@@ -20,6 +20,7 @@ const MaxFileSize = 10 * 1024 * 1024 // 10 MB
 func HandleUploadedFile(c *fiber.Ctx) (string, error) {
 	file, err := c.FormFile("picture")
 	if err != nil {
+		logger.LogError(err, "Failed to get file", nil)
 		return "", BadRequestResponse(c, "Picture is required", nil)
 	}
 
@@ -49,11 +50,12 @@ func HandleUploadedFile(c *fiber.Ctx) (string, error) {
 		logger.LogError(err, "Failed to save picture", nil)
 		return "", ErrorResponse(c, http.StatusInternalServerError, "Something went wrong, please try again later", nil)
 	}
-
+	
 	return pictureFileName, nil
 }
 
 func HandleAssetsOnUpdate(c *fiber.Ctx, existingPicture string) (string, error) {
+	println("existingPicture: ", existingPicture)
     if existingPicture != "" {
         err := DeletePicture(existingPicture)
         if err != nil {

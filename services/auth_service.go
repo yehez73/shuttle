@@ -3,83 +3,268 @@ package services
 import (
 	"context"
 	"path/filepath"
+	"strconv"
 	"time"
 
-	"shuttle/databases"
-	"shuttle/models"
 	"shuttle/errors"
+	"shuttle/logger"
+	"shuttle/models/dto"
+	"shuttle/repositories"
 
+	"github.com/google/uuid"
 	"github.com/spf13/viper"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 	"golang.org/x/crypto/bcrypt"
 )
 
-func Login(email, password string) (models.User, error) {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return models.User{}, err
-	}
-
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	var user models.User
-	err = collection.FindOne(context.Background(), bson.M{"email": email}).Decode(&user)
-	if err != nil {
-		return user, errors.New("user not found", 0)
-	}
-
-	if !validatePassword(password, user.Password) {
-		return user, errors.New("password does not match", 0)
-	}
-
-	return user, nil
+type AuthServiceInterface interface {
+	Login(email, password string) (userDataa dto.UserDataOnLoginDTO, err error)
+	GetMyProfile(userUUID string, roleCode string) (interface{}, error)
+	CheckStoredRefreshToken(userID string, refreshToken string) error
+	DeleteRefreshTokenOnLogout(ctx context.Context, userID string) error
+	UpdateUserStatus(userID string, status string, lastActive time.Time) error
 }
 
-func DeleteRefreshTokenOnLogout(userID string) error {
-	client, err := database.MongoConnection()
+type AuthService struct {
+	authRepository repositories.AuthRepositoryInterface
+	userRepository repositories.UserRepositoryInterface
+}
+
+func NewAuthService(authRepository repositories.AuthRepositoryInterface, userRepository repositories.UserRepositoryInterface) AuthService {
+	return AuthService{
+		authRepository: authRepository,
+		userRepository: userRepository,
+	}
+}
+
+func (service AuthService) Login(email, password string) (userData dto.UserDataOnLoginDTO, err error) {
+	user, err := service.authRepository.Login(email)
 	if err != nil {
-		return err
+		logger.LogError(err, "Failed to login", map[string]interface{}{
+			"email": email,
+		})
+		return dto.UserDataOnLoginDTO{}, errors.New("invalid email or password", 0)
 	}
 
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("refresh_tokens")
-
-	objectID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		return err
+	userDataOnLogin := dto.UserDataOnLoginDTO{
+		UserID:    user.ID,
+		UserUUID:  user.UUID,
+		RoleCode:  user.RoleCode,
+		Password:  user.Password,
+		FirstName: user.FirstName,
+		LastName:  user.LastName,
 	}
 
-	_, err = collection.DeleteOne(context.Background(), bson.M{"user_id": objectID})
+	if !validatePassword(password, userDataOnLogin.Password) {
+		return dto.UserDataOnLoginDTO{}, errors.New("invalid email or password", 0)
+	}
+
+	return userDataOnLogin, nil
+}
+
+func (service *AuthService) GetMyProfile(userUUID string, roleCode string) (interface{}, error) {
+	user, err := service.userRepository.FetchSpecificUser(userUUID)
 	if err != nil {
-		if err.Error() == "mongo: no documents in result" {
-			return nil
+		return nil, err
+	}
+
+	parsedUserUUID, err := uuid.Parse(userUUID)
+	if err != nil {
+		return nil, errors.New("invalid user UUID format", 0)
+	}
+
+	switch user.RoleCode {
+	case "SA":
+		superAdminDetails, err := service.userRepository.FetchSuperAdminDetails(parsedUserUUID)
+		if err != nil {
+			return nil, err
 		}
+
+		picture := superAdminDetails.Picture
+		if picture != "" {
+			imageURL, err := generateImageURL(picture)
+			if err != nil {
+				return nil, err
+			}
+			superAdminDetails.Picture = imageURL
+		}
+
+		details := dto.SuperAdminDetailsResponseDTO{
+			Picture:   superAdminDetails.Picture,
+			FirstName: superAdminDetails.FirstName,
+			LastName:  superAdminDetails.LastName,
+			Gender:    dto.Gender(superAdminDetails.Gender),
+			Phone:     superAdminDetails.Phone,
+			Address:   superAdminDetails.Address,
+		}
+
+		result := dto.UserResponseDTO{
+			UUID:       user.UUID.String(),
+			Username:   user.Username,
+			Email:      user.Email,
+			Role:       dto.Role(user.Role),
+			RoleCode:   user.RoleCode,
+			Status:     user.Status,
+			LastActive: safeTimeFormat(user.LastActive),
+			Details:    details,
+			CreatedAt:  safeTimeFormat(user.CreatedAt),
+		}
+
+		return result, nil
+	case "AS":
+		schoolAdminDetails, err := service.userRepository.FetchSchoolAdminDetails(parsedUserUUID)
+		if err != nil {
+			return nil, err
+		}
+
+		picture := schoolAdminDetails.Picture
+		if picture != "" {
+			imageURL, err := generateImageURL(picture)
+			if err != nil {
+				return nil, err
+			}
+			schoolAdminDetails.Picture = imageURL
+		}
+
+		details := dto.SchoolAdminDetailsResponseDTO{
+			FirstName: schoolAdminDetails.FirstName,
+			LastName:  schoolAdminDetails.LastName,
+			Gender:    dto.Gender(schoolAdminDetails.Gender),
+			Phone:     schoolAdminDetails.Phone,
+			Address:   schoolAdminDetails.Address,
+		}
+
+		result := dto.UserResponseDTO{
+			UUID:       user.UUID.String(),
+			Username:   user.Username,
+			Email:      user.Email,
+			Role:       dto.Role(user.Role),
+			RoleCode:   user.RoleCode,
+			Status:     user.Status,
+			LastActive: safeTimeFormat(user.LastActive),
+			Details:    details,
+			CreatedAt:  safeTimeFormat(user.CreatedAt),
+		}
+
+		return result, nil
+	case "P":
+		parentDetails, err := service.userRepository.FetchParentDetails(parsedUserUUID)
+		if err != nil {
+			return nil, err
+		}
+
+		picture := parentDetails.Picture
+		if picture != "" {
+			imageURL, err := generateImageURL(picture)
+			if err != nil {
+				return nil, err
+			}
+			parentDetails.Picture = imageURL
+		}
+
+		details := dto.ParentDetailsResponseDTO{
+			FirstName: parentDetails.FirstName,
+			LastName:  parentDetails.LastName,
+			Gender:    dto.Gender(parentDetails.Gender),
+			Phone:     parentDetails.Phone,
+			Address:   parentDetails.Address,
+		}
+
+		result := dto.UserResponseDTO{
+			UUID:       user.UUID.String(),
+			Username:   user.Username,
+			Email:      user.Email,
+			Role:       dto.Role(user.Role),
+			RoleCode:   user.RoleCode,
+			Status:     user.Status,
+			LastActive: safeTimeFormat(user.LastActive),
+			Details:    details,
+			CreatedAt:  safeTimeFormat(user.CreatedAt),
+		}
+
+		return result, nil
+	case "D":
+		driverDetails, err := service.userRepository.FetchDriverDetails(parsedUserUUID)
+		if err != nil {
+			return nil, err
+		}
+
+		picture := driverDetails.Picture
+		if picture != "" {
+			imageURL, err := generateImageURL(picture)
+			if err != nil {
+				return nil, err
+			}
+			driverDetails.Picture = imageURL
+		}
+
+		details := dto.DriverDetailsResponseDTO{
+			FirstName: driverDetails.FirstName,
+			LastName:  driverDetails.LastName,
+			Gender:    dto.Gender(driverDetails.Gender),
+			Phone:     driverDetails.Phone,
+			Address:   driverDetails.Address,
+		}
+
+		result := dto.UserResponseDTO{
+			UUID:       user.UUID.String(),
+			Username:   user.Username,
+			Email:      user.Email,
+			Role:       dto.Role(user.Role),
+			RoleCode:   user.RoleCode,
+			Status:     user.Status,
+			LastActive: safeTimeFormat(user.LastActive),
+			Details:    details,
+			CreatedAt:  safeTimeFormat(user.CreatedAt),
+		}
+
+		return result, nil
+	default:
+		return nil, errors.New("invalid role code", 0)
+	}
+}
+
+func (service *AuthService) CheckStoredRefreshToken(userID string, refreshToken string) error {
+	userIDInt, err := strconv.ParseInt(userID, 10, 64)
+	if err != nil {
+		return errors.New("invalid user ID format", 0)
+	}
+	refreshTokenEntity, err := service.authRepository.CheckRefreshTokenData(userIDInt, refreshToken)
+	if err != nil {
+		return err
+	}
+
+	if refreshTokenEntity.RefreshToken != refreshToken {
+		return errors.New("invalid refresh token", 0)
+	}
+
+	if refreshTokenEntity.ExpiredAt.Before(time.Now()) {
+		return errors.New("refresh token has expired", 0)
+	}
+
+	return nil
+}
+
+func (service *AuthService) DeleteRefreshTokenOnLogout(ctx context.Context, userID string) error {
+	userIDInt, err := strconv.ParseInt(userID, 10, 64)
+	if err != nil {
+		return errors.New("invalid user ID format", 0)
+	}
+
+	err = service.authRepository.DeleteRefreshToken(ctx, userIDInt)
+	if err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func GetMyProfile(userID string, roleCode string) (interface{}, error) {
-	user, err := GetSpecUser(userID)
+func (service *AuthService) UpdateUserStatus(UserUUID string, status string, lastActive time.Time) error {
+	err := service.authRepository.UpdateUserStatus(UserUUID, status, lastActive)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	if user.Picture != "" {
-		imageURL, err := generateImageURL(user.Picture)
-		if err != nil {
-			return nil, err
-		}
-		user.Picture = imageURL
-	}
-
-	result, err := getUserByRoleCode(user, roleCode)
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
+	return nil
 }
 
 func generateImageURL(imagePath string) (string, error) {
@@ -104,63 +289,6 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
-func getUserByRoleCode(user models.User, roleCode string) (models.UserResponse, error) {
-	userResponse := models.UserResponse{
-		ID:        user.ID,
-		Picture:   user.Picture,
-		FirstName: user.FirstName,
-		LastName:  user.LastName,
-		Gender:    user.Gender,
-		Email:     user.Email,
-		Role:      user.Role,
-		RoleCode:  user.RoleCode,
-		Phone:     user.Phone,
-		Address:   user.Address,
-		Status:    user.Status,
-		CreatedAt: user.CreatedAt,
-		CreatedBy: user.CreatedBy,
-		UpdatedAt: user.UpdatedAt,
-		UpdatedBy: user.UpdatedBy,
-	}
-
-	switch roleCode {
-	case "SA":
-		userResponse.Details = user.Details
-		return userResponse, nil
-	case "AS":
-		if details, ok := user.Details.(primitive.D); ok {
-			detailsMap := make(map[string]interface{})
-			for _, elem := range details {
-				detailsMap[elem.Key] = elem.Value
-			}
-			userResponse.Details = detailsMap
-			return userResponse, nil
-		} else {
-			return models.UserResponse{}, errors.New("school admin details are missing or invalid", 0)
-		}
-	case "P":
-		if details, ok := user.Details.(models.ParentDetails); ok {
-			userResponse.Details = details
-			return userResponse, nil
-		} else {
-			return models.UserResponse{}, errors.New("parent details are missing or invalid", 0)
-		}
-	case "D":
-		if details, ok := user.Details.(primitive.D); ok {
-			detailsMap := map[string]interface{}{}
-			for _, elem := range details {
-				detailsMap[elem.Key] = elem.Value
-			}
-			userResponse.Details = detailsMap
-			return userResponse, nil
-		} else {
-			return models.UserResponse{}, errors.New("driver details are missing or invalid", 0)
-		}
-	default:
-		return models.UserResponse{}, errors.New("role code not found", 0)
-	}
-}
-
 func hashPassword(password string) (string, error) {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -172,33 +300,4 @@ func hashPassword(password string) (string, error) {
 func validatePassword(providedPassword, storedPassword string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(providedPassword))
 	return err == nil
-}
-
-func GetStoredRefreshToken(userID string) (string, error) {
-	client, err := database.MongoConnection()
-	if err != nil {
-		return "", err
-	}
-
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("refresh_tokens")
-
-	objectID, err := primitive.ObjectIDFromHex(userID)
-	if err != nil {
-		return "", err
-	}
-
-	var storedToken models.RefreshToken
-	err = collection.FindOne(context.Background(), bson.M{"user_id": objectID}).Decode(&storedToken)
-	if err != nil {
-		if err.Error() == "mongo: no documents in result" {
-			return "", errors.New("refresh token not found for the user", 0)
-		}
-		return "", err
-	}
-
-	if time.Now().After(storedToken.ExpiredAt) {
-		return "", errors.New("refresh token has expired", 0)
-	}
-
-	return storedToken.RefreshToken, nil
 }

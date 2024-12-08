@@ -1,26 +1,29 @@
 package utils
 
 import (
-	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
-	"io"
-	"shuttle/models"
 	"time"
+	"io"
+
+	"shuttle/databases"
+	"shuttle/logger"
+	"shuttle/models/entity"
+	"shuttle/repositories"
+
 
 	"github.com/golang-jwt/jwt/v4"
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"github.com/spf13/viper"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 var jwtSecret []byte
 var encryptionKey []byte
-var client *mongo.Client
+var db *sqlx.DB
 
 func init() {
 	viper.SetConfigFile(".env")
@@ -32,20 +35,20 @@ func init() {
 	jwtSecret = []byte(viper.GetString("JWT_SECRET"))
 	encryptionKey = []byte(viper.GetString("ENCRYPTION_KEY"))
 
-	client, err = mongo.Connect(context.Background(), options.Client().ApplyURI(viper.GetString("MONGO_URI")))
+	db, err = databases.PostgresConnection()
 	if err != nil {
 		panic(err)
 	}
 }
 
 // Signed Access Token
-func GenerateToken(userId, name, role, role_code string) (string, error) {
+func GenerateToken(userID, userUUID, name, role_code string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"userId": userId,
-		"name":   name,
-		"role":   role,
+		"sub":       userID,
+		"user_uuid": userUUID,
+		"user_name":  name,
 		"role_code": role_code,
-		"exp":    time.Now().Add(time.Hour * 6).Unix(), // 2 hours expiration
+		"exp":       time.Now().Add(time.Hour * 6).Unix(), // 2 hours expiration
 	})
 
 	signedToken, err := token.SignedString(jwtSecret)
@@ -62,13 +65,14 @@ func GenerateToken(userId, name, role, role_code string) (string, error) {
 }
 
 // Same, but with 15 days expiration time and for reissuing access token
-func GenerateRefreshToken(userId, name, role, role_code string) (string, error) {
+func GenerateRefreshToken(userID, userUUID, name, role_code string) (string, error) {
+
 	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"userId": userId,
-		"name":   name,
-		"role":   role,
+		"sub":       userID,
+		"user_uuid": userUUID,
+		"user_name":  name,
 		"role_code": role_code,
-		"exp":    time.Now().Add(time.Hour * 24 * 15).Unix(), // 15 days expiration
+		"exp":       time.Now().Add(time.Hour * 24 * 15).Unix(), // 15 days expiration
 	})
 
 	signedRefreshToken, err := refreshToken.SignedString(jwtSecret)
@@ -151,25 +155,32 @@ func ValidateToken(encryptedToken string) (jwt.MapClaims, error) {
 	return nil, err
 }
 
-func SaveRefreshToken(userId, refreshToken string) error {
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("refresh_tokens")
+func SaveRefreshToken(userID int64, refreshToken string) error {
+	ID := time.Now().UnixMilli()*1e6 + int64(uuid.New().ID()%1e6)
 	expiration := time.Now().Add(time.Hour * 24 * 15)
 
-	objectId, err := primitive.ObjectIDFromHex(userId)
+	err := repositories.SaveRefreshToken(*db, entity.RefreshToken{
+		ID:          ID,
+		UserID:      userID,
+		RefreshToken: refreshToken,
+		ExpiredAt:   expiration,
+	})
 	if err != nil {
+		logger.LogError(err, "Failed to save refresh token", map[string]interface{}{
+			"user_id": userID,
+		})
 		return err
 	}
 
-	_, err = collection.InsertOne(context.Background(), models.RefreshToken{
-		UserID:       objectId,
-		RefreshToken: refreshToken,
-		ExpiredAt:    expiration,
-	})
-	return err
+	return nil
 }
 
 var InvalidTokens = make(map[string]struct{})
 
 func InvalidateToken(token string) {
+	const bearerPrefix = "Bearer "
+    if len(token) > len(bearerPrefix) && token[:len(bearerPrefix)] == bearerPrefix {
+        token = token[len(bearerPrefix):]
+    }
 	InvalidTokens[token] = struct{}{}
 }

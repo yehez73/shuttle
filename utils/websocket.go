@@ -2,18 +2,34 @@ package utils
 
 import (
 	"encoding/json"
-	"shuttle/logger"
-	"shuttle/services"
 	"sync"
 	"time"
 
+	"shuttle/logger"
+	"shuttle/repositories"
+
 	"github.com/gofiber/contrib/websocket"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
+
+type WebSocketServiceInterface interface {
+	HandleWebSocketConnection(c *websocket.Conn)
+}
+
+type WebSocketService struct {
+	userRepository repositories.UserRepositoryInterface
+	authRepository repositories.AuthRepositoryInterface
+}
+
+func NewWebSocketService(userRepository repositories.UserRepositoryInterface, authRepository repositories.AuthRepositoryInterface) WebSocketServiceInterface {
+	return &WebSocketService{
+		userRepository: userRepository,
+		authRepository: authRepository,
+	}
+}
 
 var (
 	activeConnections = make(map[string]*websocket.Conn) // Save active WebSocket connections
-	mutex             = &sync.Mutex{}                     // Ensure atomic operations
+	mutex             = &sync.Mutex{}                    // Ensure atomic operations
 )
 
 func AddConnection(ID string, conn *websocket.Conn) {
@@ -36,18 +52,12 @@ func GetConnection(ID string) (*websocket.Conn, bool) {
 }
 
 // Handle WebSocket connection
-func HandleWebSocketConnection(c *websocket.Conn) {
+func (s *WebSocketService) HandleWebSocketConnection(c *websocket.Conn) {
 	ID := c.Params("id")
 
-	_, err := services.GetSpecUser(ID)
+	_, err := s.userRepository.FetchSpecificUser(ID)
 	if err != nil {
-		logger.LogError(err, "Websocket Error Getting User", map[string]interface{}{"ID": ID})
-		return
-	}
-
-	ObjectID, err := primitive.ObjectIDFromHex(ID)
-	if err != nil {
-		logger.LogError(err, "Websocket Error Parsing ObjectID", nil)
+		logger.LogError(err, "Websocket Error Getting User", nil)
 		return
 	}
 
@@ -60,7 +70,7 @@ func HandleWebSocketConnection(c *websocket.Conn) {
 	AddConnection(ID, c)
 	logger.LogInfo("Websocket Connection Established", map[string]interface{}{"ID": ID})
 
-	err = services.UpdateUserStatus(ObjectID, "online", time.Time{})
+	err = s.authRepository.UpdateUserStatus(ID, "online", time.Time{})
 	if err != nil {
 		logger.LogError(err, "Websocket Error Updating User Status", nil)
 	}
@@ -78,45 +88,47 @@ func HandleWebSocketConnection(c *websocket.Conn) {
 			logger.LogError(err, "Websocket Error Reading Message", nil)
 			break
 		}
-	
+
 		var data struct {
 			Longitude float64 `json:"longitude"`
 			Latitude  float64 `json:"latitude"`
 		}
-		
+
 		if err := json.Unmarshal(msg, &data); err != nil {
 			logger.LogError(err, "Websocket Message Received Is Not A Location", nil)
 			break
 		}
-	
+
 		logger.LogInfo("Websocket Message Parsed", map[string]interface{}{"ID": ID, "longitude": data.Longitude, "latitude": data.Latitude})
-	
+
 		response := struct {
-			Status  string  `json:"status"`
-			Message string  `json:"message"`
+			Code    int    `json:"code"`
+			Status  string `json:"status"`
+			Message string `json:"message"`
 		}{
+			Code:    200,
 			Status:  "OK",
 			Message: "Data received successfully",
 		}
-	
+
 		responseMsg, err := json.Marshal(response)
 		if err != nil {
 			logger.LogError(err, "Error marshaling response message", nil)
 			break
 		}
-	
+
 		err = c.WriteMessage(mt, responseMsg)
 		if err != nil {
 			logger.LogError(err, "Websocket Error Writing Message", nil)
 			break
 		}
-	}	
+	}
 
 	// Disconnect user
 	RemoveConnection(ID)
 	logger.LogInfo("Websocket Connection Closed", map[string]interface{}{"ID": ID})
 
-	err = services.UpdateUserStatus(ObjectID, "offline", time.Now())
+	err = s.authRepository.UpdateUserStatus(ID, "offline", time.Now())
 	if err != nil {
 		logger.LogError(err, "Websocket Error Updating User Status", nil)
 	}

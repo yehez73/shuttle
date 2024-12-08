@@ -1,14 +1,11 @@
 package main
 
 import (
-	"context"
+	"github.com/fatih/color"
+	_ "github.com/lib/pq"
+	"golang.org/x/crypto/bcrypt"
 	"log"
 	"shuttle/databases"
-	"github.com/fatih/color"
-	"github.com/spf13/viper"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type Role string
@@ -18,22 +15,33 @@ const (
 )
 
 type User struct {
-	ID       primitive.ObjectID `json:"id" bson:"_id"`
-	Email    string             `json:"email" bson:"email"`
-	Password string             `json:"password" bson:"password"`
-	Role     Role               `json:"role" bson:"role"`
-	RoleCode string             `json:"role_code" bson:"role_code"`
+	ID       int    `json:"id" db:"user_id"`
+	UUID     string `json:"uuid" db:"user_uuid"`
+	Username string `json:"username" db:"user_username"`
+	Email    string `json:"email" db:"user_email"`
+	Password string `json:"password" db:"user_password"`
+	Role     Role   `json:"role" db:"user_role"`
+	RoleCode string `json:"role_code" db:"user_role_code"`
+}
+
+type SuperAdminDetails struct {
+	UUID      string `json:"uuid" db:"user_id"`
+	Picture   string `json:"picture" db:"user_picture"`
+	FirstName string `json:"first_name" db:"user_first_name"`
+	LastName  string `json:"last_name" db:"user_last_name"`
+	Gender    string `json:"user_gender" db:"user_gender"`
+	Phone     string `json:"phone" db:"user_phone"`
+	Address   string `json:"address" db:"user_address"`
 }
 
 func main() {
-	client, err := database.MongoConnection()
+	db, err := databases.PostgresConnection()
 	if err != nil {
-		log.Fatal("Failed to connect to MongoDB:", err)
+		log.Fatal("Failed to connect to PostgreSQL:", err)
 	}
 
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-	count, err := collection.CountDocuments(context.Background(), bson.M{"role": "superadmin"})
+	var count int
+	err = db.Get(&count, "SELECT COUNT(*) FROM users WHERE user_role = $1", SuperAdmin)
 	if err != nil {
 		log.Fatal("Failed to count users:", err)
 		return
@@ -50,32 +58,47 @@ func main() {
 		return
 	}
 
-	userID, err := primitive.ObjectIDFromHex("000000000000000000000000")
+	user := User{
+		ID:       0,
+		UUID:     "00000000-0000-0000-0000-000000000000",
+		Username: "faker",
+		Email:    "faker@gmail.com",
+		Password: hashedPassword,
+		Role:     SuperAdmin,
+		RoleCode: "SA",
+	}
+
+	details := SuperAdminDetails{
+		UUID:      user.UUID,
+		Picture:   "",
+		FirstName: "",
+		LastName:  "",
+		Gender:    "",
+		Phone:     "",
+		Address:   "",
+	}
+
+	// Use the correct struct tags in the query
+	_, err = db.Exec(`
+		INSERT INTO users (user_id, user_uuid, user_username, user_email, user_password, user_role, user_role_code)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, user.ID, user.UUID, user.Username, user.Email, user.Password, user.Role, user.RoleCode)
 	if err != nil {
-		log.Fatal("Failed to create ObjectID:", err)
+		log.Fatal("Failed to insert superadmin user:", err)
 		return
 	}
 
-	users := []interface{}{
-		User{
-			ID:       userID,
-			Email:    "faker@gmail.com",
-			Password: hashedPassword,
-			Role:     SuperAdmin,
-			RoleCode: "SA",
-		},
-	}
-
-	_, err = collection.InsertMany(context.Background(), users)
+	_, err = db.Exec(`
+		INSERT INTO super_admin_details (user_uuid, user_picture, user_first_name, user_last_name, user_gender, user_phone, user_address)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, details.UUID, details.Picture, details.FirstName, details.LastName, details.Gender, details.Phone, details.Address)
 	if err != nil {
-		log.Fatal("Failed to insert users:", err)
+		log.Fatal("Failed to insert superadmin details:", err)
 		return
 	}
 
 	color.Green("Users seeded successfully!")
 	color.Yellow("Please login and create a new user with superadmin role immediately and delete this user.")
-
-	defer client.Disconnect(context.Background())
 }
 
 func hashPassword(password string) (string, error) {

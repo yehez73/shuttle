@@ -14,7 +14,7 @@ import (
 )
 
 func GetAllRoutes(SchoolID primitive.ObjectID) ([]models.RoadRoute, error) {
-	client, err := database.MongoConnection()
+	client, err := databases.MongoConnection()
 	if err != nil {
 		return nil, err
 	}
@@ -35,7 +35,7 @@ func GetAllRoutes(SchoolID primitive.ObjectID) ([]models.RoadRoute, error) {
 }
 
 func GetSpecRoute(RouteID primitive.ObjectID) (models.RoadRoute, error) {
-	client, err := database.MongoConnection()
+	client, err := databases.MongoConnection()
 	if err != nil {
 		return models.RoadRoute{}, err
 	}
@@ -52,7 +52,7 @@ func GetSpecRoute(RouteID primitive.ObjectID) (models.RoadRoute, error) {
 }
 
 func AddRoute(route models.RoadRoute, SchoolID primitive.ObjectID, username string) error {
-	client, err := database.MongoConnection()
+	client, err := databases.MongoConnection()
 	if err != nil {
 		return err
 	}

@@ -48,3 +48,12 @@ func LogDebug(message string, details map[string]interface{}) {
 		Interface("details", details).
 		Msg(message)
 }
+
+// For logging fatal
+func LogFatal(err error, message string, details map[string]interface{}) {
+	Log.Fatal().
+		Err(err).
+		Str("message", message).
+		Interface("details", details).
+		Msg(message)
+}

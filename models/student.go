@@ -1,6 +1,8 @@
 package models
 
 import (
+	"shuttle/models/entity"
+
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
@@ -15,7 +17,7 @@ type Student struct {
 
 type SchoolStudentRequest struct {
 	Student `json:"student" validate:"required"`
-	Parent  User `json:"parent" validate:"required"`
+	Parent  entity.User `json:"parent" validate:"required"`
 }
 
 type SchoolStudentParentResponse struct {
@@ -28,7 +30,7 @@ type ParentResponse struct {
 	FirstName string             `json:"first_name" bson:"first_name" validate:"required"`
 	LastName  string             `json:"last_name" bson:"last_name" validate:"required"`
 	Email     string             `json:"email" bson:"email" validate:"required,email"`
-	Role      Role               `json:"role" bson:"role" validate:"required"`
+	Role      entity.User               `json:"role" bson:"role" validate:"required"`
 }
 
 type StudentResponse struct {
