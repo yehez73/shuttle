@@ -40,7 +40,20 @@ air
 Base URL = http://:8080
 
 ### Run this first
+```sh
+cd shuttleapps
+go run .\database\migrations\goose.go
+```
 
+or manually with
+```sh
+// up for migrate (all)
+goose -dir ./databases/migrations postgres "user=YOUR_POSTGRES_USER password=YOUR_POSTGRES_PASSWORD dbname=YOUR_POSTGRES_DB sslmode=disable" up
+// down for rollback (once)
+goose -dir ./databases/migrations postgres "user=YOUR_POSTGRES_USER password=YOUR_POSTGRES_PASSWORD dbname=YOUR_POSTGRES_DB sslmode=disable" down
+```
+
+then
 ```sh
 cd shuttleapps
 go run .\databases\seeders\seeders.go
