@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	"shuttle/errors"
@@ -18,10 +17,11 @@ import (
 
 type AuthServiceInterface interface {
 	Login(email, password string) (userDataa dto.UserDataOnLoginDTO, err error)
-	GetMyProfile(userUUID string, roleCode string) (interface{}, error)
+	GetMyProfile(userUUID, roleCode string) (interface{}, error)
 	CheckStoredRefreshToken(userID string, refreshToken string) error
 	DeleteRefreshTokenOnLogout(ctx context.Context, userID string) error
-	UpdateUserStatus(userID string, status string, lastActive time.Time) error
+	UpdateUserStatus(userUUID, status string, lastActive time.Time) error
+	UpdateRefreshToken(userUUID, refreshToken string) error
 }
 
 type AuthService struct {
@@ -48,10 +48,9 @@ func (service AuthService) Login(email, password string) (userData dto.UserDataO
 	userDataOnLogin := dto.UserDataOnLoginDTO{
 		UserID:    user.ID,
 		UserUUID:  user.UUID,
+		Username:  user.Username,
 		RoleCode:  user.RoleCode,
 		Password:  user.Password,
-		FirstName: user.FirstName,
-		LastName:  user.LastName,
 	}
 
 	if !validatePassword(password, userDataOnLogin.Password) {
@@ -61,7 +60,8 @@ func (service AuthService) Login(email, password string) (userData dto.UserDataO
 	return userDataOnLogin, nil
 }
 
-func (service *AuthService) GetMyProfile(userUUID string, roleCode string) (interface{}, error) {
+func (service *AuthService) GetMyProfile(userUUID, roleCode string) (interface{}, error) {
+
 	user, err := service.userRepository.FetchSpecificUser(userUUID)
 	if err != nil {
 		return nil, err
@@ -223,12 +223,8 @@ func (service *AuthService) GetMyProfile(userUUID string, roleCode string) (inte
 	}
 }
 
-func (service *AuthService) CheckStoredRefreshToken(userID string, refreshToken string) error {
-	userIDInt, err := strconv.ParseInt(userID, 10, 64)
-	if err != nil {
-		return errors.New("invalid user ID format", 0)
-	}
-	refreshTokenEntity, err := service.authRepository.CheckRefreshTokenData(userIDInt, refreshToken)
+func (service *AuthService) CheckStoredRefreshToken(userUUID string, refreshToken string) error {
+	refreshTokenEntity, err := service.authRepository.CheckRefreshTokenData(userUUID, refreshToken)
 	if err != nil {
 		return err
 	}
@@ -244,13 +240,8 @@ func (service *AuthService) CheckStoredRefreshToken(userID string, refreshToken 
 	return nil
 }
 
-func (service *AuthService) DeleteRefreshTokenOnLogout(ctx context.Context, userID string) error {
-	userIDInt, err := strconv.ParseInt(userID, 10, 64)
-	if err != nil {
-		return errors.New("invalid user ID format", 0)
-	}
-
-	err = service.authRepository.DeleteRefreshToken(ctx, userIDInt)
+func (service *AuthService) DeleteRefreshTokenOnLogout(ctx context.Context, userUUID string) error {
+	err := service.authRepository.DeleteRefreshToken(ctx, userUUID)
 	if err != nil {
 		return err
 	}
@@ -258,10 +249,28 @@ func (service *AuthService) DeleteRefreshTokenOnLogout(ctx context.Context, user
 	return nil
 }
 
-func (service *AuthService) UpdateUserStatus(UserUUID string, status string, lastActive time.Time) error {
-	err := service.authRepository.UpdateUserStatus(UserUUID, status, lastActive)
+func (service *AuthService) UpdateUserStatus(userUUID, status string, lastActive time.Time) error {
+	err := service.authRepository.UpdateUserStatus(userUUID, status, lastActive)
 	if err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func (service *AuthService) UpdateRefreshToken(userUUID, refreshToken string) error {
+	tokendata, err := service.authRepository.CheckRefreshTokenData(userUUID, refreshToken)
+	if err != nil {
+		return err
+	}
+
+	if tokendata.LastUsedAt != nil && time.Since(*tokendata.LastUsedAt) > time.Hour {
+		_, err := service.authRepository.UpdateRefreshToken(userUUID, refreshToken)
+		if err != nil {
+			return err
+		}
+	} else {
+		return errors.New("cannot reissue a new access token yet", 0)
 	}
 
 	return nil
@@ -273,7 +282,7 @@ func generateImageURL(imagePath string) (string, error) {
 
 	ext := filepath.Ext(fileName)
 	if !contains(allowedExtensions, ext) {
-		return "", errors.New("invalid image extension", 0)
+		return "", nil
 	}
 
 	baseURL := "http://" + viper.GetString("BASE_URL") + "/assets/images/"

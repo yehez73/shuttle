@@ -2,6 +2,7 @@ package services
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 
 	"shuttle/models/dto"
@@ -16,50 +17,61 @@ type SchoolServiceInterface interface {
 	GetSpecSchool(uuid string) (dto.SchoolResponseDTO, error)
 	AddSchool(req dto.SchoolRequestDTO, username string) error
 	UpdateSchool(id string, req dto.SchoolRequestDTO, username string) error
-	DeleteSchool(id string, username string) error
+	DeleteSchool(id, username, adminUUID string) error
 }
 
 type SchoolService struct {
 	schoolRepository repositories.SchoolRepositoryInterface
+	userRepository   repositories.UserRepositoryInterface
 }
 
-func NewSchoolService(schoolRepository repositories.SchoolRepositoryInterface) SchoolService {
+func NewSchoolService(schoolRepository repositories.SchoolRepositoryInterface, userRepository repositories.UserRepositoryInterface) SchoolService {
 	return SchoolService{
 		schoolRepository: schoolRepository,
+		userRepository:   userRepository,
 	}
 }
 
 func (service *SchoolService) GetAllSchools(page, limit int, sortField, sortDirection string) ([]dto.SchoolResponseDTO, int, error) {
 	offset := (page - 1) * limit
 
-	schools, admin, err := service.schoolRepository.FetchAllSchools(offset, limit, sortField, sortDirection)
+	// Fetch data schools dan admin
+	schools, adminMap, err := service.schoolRepository.FetchAllSchools(offset, limit, sortField, sortDirection)
 	if err != nil {
 		return nil, 0, err
 	}
 
+	// Hitung total schools
 	total, err := service.schoolRepository.CountSchools()
 	if err != nil {
 		return nil, 0, err
 	}
 
+	// Convert schools dan admin menjadi DTO
 	var schoolsDTO []dto.SchoolResponseDTO
 	for _, school := range schools {
+		admins := adminMap[school.UUID.String()] // Ambil slice admin berdasarkan UUID sekolah
 
+		// Buat string adminFullName (gabungkan nama admin)
 		var adminFullName string
-
-		if admin[school.UUID.String()].SchoolUUID == uuid.Nil {
+		if len(admins) == 0 {
 			adminFullName = "N/A"
-		} else if admin[school.UUID.String()].SchoolUUID != uuid.Nil {
-			adminFullName = admin[school.UUID.String()].FirstName + " " + admin[school.UUID.String()].LastName
+		} else {
+			var names []string
+			for _, admin := range admins {
+				names = append(names, admin.FirstName+" "+admin.LastName)
+			}
+			adminFullName = strings.Join(names, ", ") // Gabungkan nama admin dengan koma
 		}
 
+		// Masukkan data ke DTO
 		schoolsDTO = append(schoolsDTO, dto.SchoolResponseDTO{
-			UUID:        school.UUID.String(),
-			Name:        school.Name,
-			AdminName:   adminFullName,
-			Address:     school.Address,
-			Contact:     school.Contact,
-			Email:       school.Email,
+			UUID:      school.UUID.String(),
+			Name:      school.Name,
+			AdminName: adminFullName,
+			Address:   school.Address,
+			Contact:   school.Contact,
+			Email:     school.Email,
 		})
 	}
 
@@ -67,25 +79,35 @@ func (service *SchoolService) GetAllSchools(page, limit int, sortField, sortDire
 }
 
 func (service *SchoolService) GetSpecSchool(id string) (dto.SchoolResponseDTO, error) {
-	school, admin, err := service.schoolRepository.FetchSpecSchool(id)
+	school, admins, err := service.schoolRepository.FetchSpecSchool(id)
 	if err != nil {
 		return dto.SchoolResponseDTO{}, err
 	}
 
-	var userUUID, userFullName string
-	if admin.SchoolUUID == uuid.Nil {
-		userUUID = "N/A"
-		userFullName = "N/A"
-	} else {
-		userUUID = admin.UserUUID.String()
-		userFullName = admin.FirstName + " " + admin.LastName
+	var adminNames, adminUUIDs []string
+	for _, admin := range admins {
+		userFullName := "N/A"
+		if admin.UserUUID != uuid.Nil {
+			userFullName = admin.FirstName + " " + admin.LastName
+		}
+
+		adminUUID := "N/A"
+		if admin.UserUUID != uuid.Nil {
+			adminUUID = admin.UserUUID.String()
+		}
+
+		adminUUIDs = append(adminUUIDs, adminUUID)
+		adminNames = append(adminNames, userFullName)
 	}
+
+	adminUUIDsStr := strings.Join(adminUUIDs, ", ")
+	adminNamesStr := strings.Join(adminNames, ", ")
 
 	schoolDTO := dto.SchoolResponseDTO{
 		UUID:        school.UUID.String(),
 		Name:        school.Name,
-		AdminUUID:   userUUID,
-		AdminName:   userFullName,
+		AdminUUID:   adminUUIDsStr,
+		AdminName:   adminNamesStr,
 		Address:     school.Address,
 		Contact:     school.Contact,
 		Email:       school.Email,
@@ -142,23 +164,77 @@ func (service *SchoolService) UpdateSchool(id string, req dto.SchoolRequestDTO, 
 	return nil
 }
 
-func (service *SchoolService) DeleteSchool(id string, username string) error {
+func (service *SchoolService) DeleteSchool(id, username, adminUUID string) error {
 	parsedUUID, err := uuid.Parse(id)
 	if err != nil {
 		return err
 	}
 
-	school := entity.School{
-		UUID:      parsedUUID,
-		DeletedAt: toNullTime(time.Now()),
-		DeletedBy: toNullString(username),
-	}
+	// Handle multiple admin UUIDs deletion
+	if adminUUID != "N/A" && adminUUID != "" {
+		uuidList := strings.Split(adminUUID, ", ")
 
-	if err := service.schoolRepository.DeleteSchool(school); err != nil {
-		return err
-	}
+		tx, err := service.userRepository.BeginTransaction()
+		if err != nil {
+			return err
+		}
+		var transactionErr error
+		defer func() {
+			if transactionErr != nil {
+				tx.Rollback()
+			} else {
+				transactionErr = tx.Commit()
+			}
+		}()
 
-	return nil
+		for _, uuids := range uuidList {
+			parsedAdminUUID, err := uuid.Parse(uuids)
+			if err != nil {
+				continue
+			}
+
+			if err := service.userRepository.DeleteSchoolAdmin(tx, parsedAdminUUID, username); err != nil {
+				return err
+			}
+		}
+
+		school := entity.School{
+			UUID:      parsedUUID,
+			DeletedAt: toNullTime(time.Now()),
+			DeletedBy: toNullString(username),
+		}
+
+		if err := service.schoolRepository.DeleteSchool(school); err != nil {
+			return err
+		}
+
+		return nil
+	} else {
+		tx, err := service.userRepository.BeginTransaction()
+		if err != nil {
+			return err
+		}
+		var transactionErr error
+		defer func() {
+			if transactionErr != nil {
+				tx.Rollback()
+			} else {
+				transactionErr = tx.Commit()
+			}
+		}()
+
+		// Delete the school
+		school := entity.School{
+			UUID:      parsedUUID,
+			DeletedAt: toNullTime(time.Now()),
+			DeletedBy: toNullString(username),
+		}
+		if err := service.schoolRepository.DeleteSchool(school); err != nil {
+			return err
+		}
+
+		return nil
+	}
 }
 
 func safeStringFormat(s sql.NullString) string {

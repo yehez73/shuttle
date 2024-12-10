@@ -9,7 +9,7 @@ type VehicleRequestDTO struct {
 	Color  string `json:"vehicle_color" validate:"required"`
 	Seats  int    `json:"vehicle_seats" validate:"required"`
 	Status string `json:"vehicle_status" validate:"required"`
-	School string `json:"school_id"`
+	School string `json:"school_uuid"`
 }
 
 type VehicleResponseDTO struct {

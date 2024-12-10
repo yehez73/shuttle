@@ -1,6 +1,7 @@
 package services
 
 import (
+	"shuttle/errors"
 	"shuttle/models/dto"
 	"shuttle/models/entity"
 	"shuttle/repositories"
@@ -74,8 +75,8 @@ func (service *VehicleService) GetAllVehicles(page, limit int, sortField, sortDi
 	return vehiclesDTO, total, nil
 }
 
-func (service *VehicleService) GetSpecVehicle(uuid string) (dto.VehicleResponseDTO, error) {
-	vehicle, school, driver, err := service.vehicleRepository.FetchSpecVehicle(uuid)
+func (service *VehicleService) GetSpecVehicle(id string) (dto.VehicleResponseDTO, error) {
+	vehicle, school, driver, err := service.vehicleRepository.FetchSpecVehicle(id)
 	if err != nil {
 		return dto.VehicleResponseDTO{}, err
 	}
@@ -90,10 +91,10 @@ func (service *VehicleService) GetSpecVehicle(uuid string) (dto.VehicleResponseD
 	}
 
 	var driverUUID, driverName string
-	if vehicle.DriverUUID == nil {
+	if driver.UserUUID == uuid.Nil {
 		driverUUID = "N/A"
 		driverName = "N/A"
-	} else if vehicle.DriverUUID != nil {
+	} else if driver.UserUUID != uuid.Nil {
 		driverUUID = vehicle.DriverUUID.String()
 		driverName = driver.FirstName + " " + driver.LastName
 	}
@@ -141,7 +142,16 @@ func (service *VehicleService) AddVehicle(req dto.VehicleRequestDTO) error {
 		vehicle.SchoolUUID = nil
 	}
 
-	err := service.vehicleRepository.SaveVehicle(vehicle)
+	isExistingVehicleNumber, err := service.vehicleRepository.CheckVehicleNumberExists("", vehicle.VehicleNumber)
+	if err != nil {
+		return err
+	}
+
+	if isExistingVehicleNumber {
+		return errors.New("Vehicle number already exists", 400)
+	}
+
+	err = service.vehicleRepository.SaveVehicle(vehicle)
 	if err != nil {
 		return err
 	}
@@ -175,6 +185,15 @@ func (service *VehicleService) UpdateVehicle(id string, req dto.VehicleRequestDT
 		vehicle.SchoolUUID = &schoolUUID
 	} else {
 		vehicle.SchoolUUID = nil
+	}
+
+	isExistingVehicleNumber, err := service.vehicleRepository.CheckVehicleNumberExists(id, vehicle.VehicleNumber)
+	if err != nil {
+		return err
+	}
+
+	if isExistingVehicleNumber {
+		return errors.New("Vehicle number already exists", 400)
 	}
 
 	err = service.vehicleRepository.UpdateVehicle(vehicle)

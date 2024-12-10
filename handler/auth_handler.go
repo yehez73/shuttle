@@ -31,7 +31,7 @@ func NewAuthHttpHandler(authService services.AuthService) AuthHandlerInterface {
 func (handler *authHandler) Login(c *fiber.Ctx) error {
 	loginRequest := new(dto.LoginRequest)
 	if err := c.BodyParser(loginRequest); err != nil {
-		return utils.BadRequestResponse(c, "Invalid request data", 400)
+		return utils.BadRequestResponse(c, "Invalid request data", nil)
 	}
 
 	userDataOnLogin, err := handler.authService.Login(loginRequest.Email, loginRequest.Password)
@@ -42,17 +42,13 @@ func (handler *authHandler) Login(c *fiber.Ctx) error {
 		return utils.UnauthorizedResponse(c, "Invalid email or password", nil)
 	}
 
-	fmt.Printf("User data on login: %+v\n", userDataOnLogin)
-
 	logger.LogInfo("User logged in", map[string]interface{}{
-		"id": userDataOnLogin.UserID,
-		"email":   loginRequest.Email,
+		"id":    userDataOnLogin.UserID,
+		"email": loginRequest.Email,
 	})
 
-	Fullname := userDataOnLogin.FirstName + " " + userDataOnLogin.LastName
-
 	// Access token (short expiration)
-	accessToken, err := utils.GenerateToken(fmt.Sprintf("%d", userDataOnLogin.UserID), userDataOnLogin.UserUUID, Fullname, userDataOnLogin.RoleCode)
+	accessToken, err := utils.GenerateToken(fmt.Sprintf("%d", userDataOnLogin.UserID), userDataOnLogin.UserUUID, userDataOnLogin.Username, userDataOnLogin.RoleCode)
 	if err != nil {
 		logger.LogError(err, "Failed to generate access token", map[string]interface{}{
 			"user_id": userDataOnLogin.UserID,
@@ -61,7 +57,7 @@ func (handler *authHandler) Login(c *fiber.Ctx) error {
 	}
 
 	// Refresh token (long expiration)
-	refreshToken, err := utils.GenerateRefreshToken(fmt.Sprintf("%d", userDataOnLogin.UserID), userDataOnLogin.UserUUID, Fullname, userDataOnLogin.RoleCode)
+	refreshToken, err := utils.GenerateRefreshToken(fmt.Sprintf("%d", userDataOnLogin.UserID), userDataOnLogin.UserUUID, userDataOnLogin.Username, userDataOnLogin.RoleCode)
 	if err != nil {
 		logger.LogError(err, "Failed to generate refresh token", map[string]interface{}{
 			"user_id": userDataOnLogin.UserID,
@@ -70,7 +66,7 @@ func (handler *authHandler) Login(c *fiber.Ctx) error {
 	}
 
 	// Save refresh token in the database
-	err = utils.SaveRefreshToken(userDataOnLogin.UserID, refreshToken)
+	err = utils.SaveRefreshToken(userDataOnLogin.UserUUID, refreshToken)
 	if err != nil {
 		logger.LogError(err, "Failed to save refresh token", map[string]interface{}{
 			"user_id": userDataOnLogin.UserID,
@@ -87,7 +83,10 @@ func (handler *authHandler) Login(c *fiber.Ctx) error {
 }
 
 func (handler *authHandler) Logout(c *fiber.Ctx) error {
-	userUUID := c.Locals("userUUID").(string)
+	userUUID, ok := c.Locals("userUUID").(string)
+	if !ok {
+		return utils.UnauthorizedResponse(c, "Token is invalid", nil)
+	}
 
 	// Delete WebSocket connection if exists
 	conn, exists := utils.GetConnection(userUUID)
@@ -95,14 +94,14 @@ func (handler *authHandler) Logout(c *fiber.Ctx) error {
 		conn.Close()
 		utils.RemoveConnection(userUUID)
 		logger.LogInfo("WebSocket connection closed", map[string]interface{}{
-			"user_id": userUUID,
+			"user_uuid": userUUID,
 		})
 	}
 
 	err := handler.authService.DeleteRefreshTokenOnLogout(c.Context(), userUUID)
 	if err != nil {
 		logger.LogError(err, "Failed to delete refresh token", map[string]interface{}{
-			"user_id": userUUID,
+			"user_uuid": userUUID,
 		})
 		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}
@@ -112,7 +111,7 @@ func (handler *authHandler) Logout(c *fiber.Ctx) error {
 	err = handler.authService.UpdateUserStatus(userUUID, "offline", time.Now())
 	if err != nil {
 		logger.LogError(err, "Failed to update user status", map[string]interface{}{
-			"user_id": userUUID,
+			"user_uuid": userUUID,
 		})
 		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}
@@ -121,13 +120,20 @@ func (handler *authHandler) Logout(c *fiber.Ctx) error {
 }
 
 func (handler *authHandler) GetMyProfile(c *fiber.Ctx) error {
-	userUUID := c.Locals("userUUID").(string)
-	roleCode := c.Locals("role_code").(string)
-	
+	userUUID, ok := c.Locals("userUUID").(string)
+	if !ok {
+		return utils.UnauthorizedResponse(c, "Token is invalid", nil)
+	}
+
+	roleCode, ok := c.Locals("role_code").(string)
+	if !ok {
+		return utils.UnauthorizedResponse(c, "Token is invalid", nil)
+	}
+
 	user, err := handler.authService.GetMyProfile(userUUID, roleCode)
 	if err != nil {
 		logger.LogError(err, "Failed to get user profile", map[string]interface{}{
-			"user_id": userUUID,
+			"user_uuid": userUUID,
 		})
 		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}
@@ -159,17 +165,25 @@ func (handler *authHandler) IssueNewAccessToken(c *fiber.Ctx) error {
 	userID := claims["sub"].(string)
 	userUUID := claims["user_uuid"].(string)
 
-	tokenErr := handler.authService.CheckStoredRefreshToken(userID, refreshToken)
+	tokenErr := handler.authService.CheckStoredRefreshToken(userUUID, refreshToken)
 	if tokenErr != nil {
 		logger.LogError(tokenErr, "Failed to get stored refresh token", map[string]interface{}{
 			"user_id": userID,
-			"token":  refreshToken,
+			"token":   refreshToken,
 		})
 		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}
 
 	username := claims["user_name"].(string)
 	roleCode := claims["role_code"].(string)
+
+	err = handler.authService.UpdateRefreshToken(userUUID, refreshToken)
+	if err != nil {
+		logger.LogError(err, "Failed to update refresh token", map[string]interface{}{
+			"user_uuid": userUUID,
+		})
+		return utils.UnauthorizedResponse(c, "Your session has expired or revoked, please login again", nil)
+	}
 
 	// Generate new access token
 	accessToken, err := utils.GenerateToken(userID, userUUID, username, roleCode)

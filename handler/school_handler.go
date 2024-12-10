@@ -43,8 +43,8 @@ func (handler *schoolHandler) GetAllSchools(c *fiber.Ctx) error {
         return utils.BadRequestResponse(c, "Invalid limit number", nil)
     }
 
-    sortField := c.Query("sort_field", "school_id")
-    sortDirection := c.Query("sort_direction", "desc")
+    sortField := c.Query("sort_by", "school_id")
+    sortDirection := c.Query("direction", "desc")
 
     if sortDirection != "asc" && sortDirection != "desc" {
         return utils.BadRequestResponse(c, "Invalid sort direction, use 'asc' or 'desc'", nil)
@@ -75,7 +75,10 @@ func (handler *schoolHandler) GetAllSchools(c *fiber.Ctx) error {
         start = 0
     }
 
-	end := limit
+	end := start + len(schools) - 1
+    if end > totalItems {
+        end = totalItems
+    }
 	
     if len(schools) == 0 {
         start = 0
@@ -154,7 +157,19 @@ func (handler *schoolHandler) DeleteSchool(c *fiber.Ctx) error {
 	id := c.Params("id")
 	username := c.Locals("user_name").(string)
 
-	if err := handler.schoolService.DeleteSchool(id, username); err != nil {
+	force_delete := c.Query("force_delete")
+
+	existingSchool, err := handler.schoolService.GetSpecSchool(id)
+	if err != nil {
+		logger.LogError(err, "Failed to fetch specific school", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	if (existingSchool.AdminUUID != "N/A" && existingSchool.AdminUUID != "") && force_delete != "true" {
+		return utils.BadRequestResponse(c, "Warning: By deleting this school, the school admin will also be deleted, continue?", nil)
+	}
+
+	if err := handler.schoolService.DeleteSchool(id, username, existingSchool.AdminUUID); err != nil {
 		logger.LogError(err, "Failed to delete school", nil)
 		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}

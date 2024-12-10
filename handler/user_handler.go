@@ -17,12 +17,19 @@ import (
 
 type UserHandlerInterface interface {
 	GetAllSuperAdmin(c *fiber.Ctx) error
-	GetSpecSuperAdmin(c *fiber.Ctx) error
 	GetAllSchoolAdmin(c *fiber.Ctx) error
-	GetSpecSchoolAdmin(c *fiber.Ctx) error
 	GetAllPermittedDriver(c *fiber.Ctx) error
+
+	GetSpecSuperAdmin(c *fiber.Ctx) error
+	GetSpecSchoolAdmin(c *fiber.Ctx) error
+	GetSpecPermittedDriver(c *fiber.Ctx) error
+
 	AddUser(c *fiber.Ctx) error
 	UpdateUser(c *fiber.Ctx) error
+
+	DeleteSuperAdmin(c *fiber.Ctx) error
+	DeleteSchoolAdmin(c *fiber.Ctx) error
+	DeleteDriver(c *fiber.Ctx) error
 }
 
 type userHandler struct {
@@ -101,17 +108,6 @@ func (handler *userHandler) GetAllSuperAdmin(c *fiber.Ctx) error {
 	return utils.SuccessResponse(c, "Users fetched successfully", response)
 }
 
-func (handler *userHandler) GetSpecSuperAdmin(c *fiber.Ctx) error {
-	id := c.Params("id")
-	user, err := handler.userService.GetSpecSuperAdmin(id)
-	if err != nil {
-		logger.LogError(err, "Failed to fetch specific super admin", nil)
-		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
-	}
-
-	return utils.SuccessResponse(c, "User fetched successfully", user)
-}
-
 func (handler *userHandler) GetAllSchoolAdmin(c *fiber.Ctx) error {
 	page, err := strconv.Atoi(c.Query("page", "1"))
 	if err != nil || page < 1 {
@@ -174,17 +170,6 @@ func (handler *userHandler) GetAllSchoolAdmin(c *fiber.Ctx) error {
 	}
 
 	return utils.SuccessResponse(c, "Users fetched successfully", response)
-}
-
-func (handler *userHandler) GetSpecSchoolAdmin(c *fiber.Ctx) error {
-	id := c.Params("id")
-	user, err := handler.userService.GetSpecSchoolAdmin(id)
-	if err != nil {
-		logger.LogError(err, "Failed to fetch specific school admin", nil)
-		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
-	}
-
-	return utils.SuccessResponse(c, "User fetched successfully", user)
 }
 
 func (handler *userHandler) GetAllPermittedDriver(c *fiber.Ctx) error {
@@ -302,6 +287,86 @@ func (handler *userHandler) GetAllPermittedDriver(c *fiber.Ctx) error {
 	default:
 		return utils.BadRequestResponse(c, "Invalid role", nil)
 	}
+}
+
+func (handler *userHandler) GetSpecPermittedDriver(c *fiber.Ctx) error {
+	id := c.Params("id")
+	role := c.Locals("role_code").(string)
+
+	var user dto.UserResponseDTO
+	var err error
+
+	switch role {
+	case "SA":
+		user, err = handler.userService.GetSpecDriverFromAllSchools(id)
+	// case "AS":
+	// 	schoolUUID, ok := c.Locals("schoolUUID").(string)
+	// 	if !ok {
+	// 		return utils.BadRequestResponse(c, "Token is invalid", nil)
+	// 	}
+
+	// 	user, err = handler.userService.GetSpecDriverForPermittedSchool(id, schoolUUID)
+	default:
+		return utils.BadRequestResponse(c, "Invalid role", nil)
+	}
+
+	if err != nil {
+		logger.LogError(err, "Failed to fetch specific driver", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	return utils.SuccessResponse(c, "User fetched successfully", user)
+}
+
+func (handler *userHandler) DeleteDriver(c *fiber.Ctx) error {
+	id := c.Params("id")
+	username := c.Locals("user_name").(string)
+
+	forceDelete := c.Query("force_delete")
+
+	existingUser, checkErr := handler.userService.GetSpecUserWithDetails(id)
+	if checkErr != nil {
+		return utils.NotFoundResponse(c, "User not found", nil)
+	}
+
+	detailsMap, mapErr := convertToMap(existingUser.Details)
+	if mapErr != nil {
+		logger.LogError(mapErr, "Failed to convert details to map", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	if (detailsMap["SchoolUUID"] != "N/A" && detailsMap["SchoolUUID"] != "") && forceDelete != "true" {
+		return utils.BadRequestResponse(c, "Warning: This driver is still associated with a school, continue?", nil)
+	}
+
+	err := handler.userService.DeleteDriver(id, username)
+	if err != nil {
+		return utils.InternalServerErrorResponse(c, "Failed to delete driver", nil)
+	}
+
+	return utils.SuccessResponse(c, "Driver deleted successfully", nil)
+}
+
+func (handler *userHandler) GetSpecSuperAdmin(c *fiber.Ctx) error {
+	id := c.Params("id")
+	user, err := handler.userService.GetSpecSuperAdmin(id)
+	if err != nil {
+		logger.LogError(err, "Failed to fetch specific super admin", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	return utils.SuccessResponse(c, "User fetched successfully", user)
+}
+
+func (handler *userHandler) GetSpecSchoolAdmin(c *fiber.Ctx) error {
+	id := c.Params("id")
+	user, err := handler.userService.GetSpecSchoolAdmin(id)
+	if err != nil {
+		logger.LogError(err, "Failed to fetch specific school admin", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	return utils.SuccessResponse(c, "User fetched successfully", user)
 }
 
 // func GetAllPermittedDriver(c *fiber.Ctx) error {
@@ -430,35 +495,48 @@ func (handler *userHandler) UpdateUser(c *fiber.Ctx) error {
 	return utils.SuccessResponse(c, "User updated successfully", nil)
 }
 
-func DeleteUser(c *fiber.Ctx) error {
+func (handler *userHandler) DeleteSuperAdmin(c *fiber.Ctx) error {
 	id := c.Params("id")
-	if err := services.DeleteUser(id); err != nil {
-		logger.LogError(err, "Failed to delete user", nil)
+	username := c.Locals("user_name").(string)
+
+	if err := handler.userService.DeleteSuperAdmin(id, username); err != nil {
+		if customErr, ok := err.(*errors.CustomError); ok {
+			return utils.ErrorResponse(c, customErr.StatusCode, strings.ToUpper(string(customErr.Message[0]))+customErr.Message[1:], nil)
+		}
+		logger.LogError(err, "Failed to delete super admin", nil)
 		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}
 
-	return utils.SuccessResponse(c, "User deleted successfully", nil)
+	return utils.SuccessResponse(c, "Super admin deleted successfully", nil)
 }
 
+func (handler *userHandler) DeleteSchoolAdmin(c *fiber.Ctx) error {
+	id := c.Params("id")
+	username := c.Locals("user_name").(string)
 
-func safeString(value interface{}) string {
-	if str, ok := value.(string); ok {
-		return str
-	}
-	return ""
-}
+	forceDelete := c.Query("force_delete")
 
-func convertToMap(data interface{}) (map[string]interface{}, error) {
-	bytes, err := json.Marshal(data)
-	if err != nil {
-		return nil, err
+	existingUser, checkErr := handler.userService.GetSpecUserWithDetails(id)
+	if checkErr != nil {
+		return utils.NotFoundResponse(c, "User not found", nil)
 	}
-	var result map[string]interface{}
-	err = json.Unmarshal(bytes, &result)
-	if err != nil {
-		return nil, err
+
+	detailsMap, mapErr := convertToMap(existingUser.Details)
+	if mapErr != nil {
+		logger.LogError(mapErr, "Failed to convert details to map", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}
-	return result, nil
+
+	if (detailsMap["SchoolUUID"] != "N/A" && detailsMap["SchoolUUID"] != "") && forceDelete != "true" {
+		return utils.BadRequestResponse(c, "Warning: This school admin is still associated with a school, continue?", nil)
+	}
+
+	err := handler.userService.DeleteSchoolAdmin(id, username)
+	if err != nil {
+		return utils.InternalServerErrorResponse(c, "Failed to delete school admin", nil)
+	}
+
+	return utils.SuccessResponse(c, "School admin deleted successfully", nil)
 }
 
 // func validateCommonUserFields(c *fiber.Ctx, user *dto.UserRequestsDTO, handler userHandler) error {
@@ -503,7 +581,7 @@ func validateUserRoleDetails(c *fiber.Ctx, user *dto.UserRequestsDTO, handler us
 		user.RoleCode = "SA"
 
 	case dto.SchoolAdmin:
-		details, err := ParseDetails[dto.SchoolAdminDetailsRequestsDTO](user.Details)
+		details, err := parseDetails[dto.SchoolAdminDetailsRequestsDTO](user.Details)
 		if err != nil {
 			logger.LogError(err, "Invalid details format for SchoolAdmin", map[string]interface{}{
 				"details": user.Details,
@@ -511,13 +589,13 @@ func validateUserRoleDetails(c *fiber.Ctx, user *dto.UserRequestsDTO, handler us
 			return errors.New("invalid details format for SchoolAdmin", 400)
 		}
 
-		if details.SchoolID == "" {
-			return errors.New("school ID is required for SchoolAdmin", 400)
+		if details.SchoolUUID == "" {
+			return errors.New("school is required for SchoolAdmin", 400)
 		}
 
-		_, errSchool := handler.schoolService.GetSpecSchool(details.SchoolID)
+		_, errSchool := handler.schoolService.GetSpecSchool(details.SchoolUUID)
 		if errSchool != nil {
-			return errors.New("school is not found", 400)
+			return errors.New("school is not found", 404)
 		}
 
 		user.RoleCode = "AS"
@@ -530,7 +608,7 @@ func validateUserRoleDetails(c *fiber.Ctx, user *dto.UserRequestsDTO, handler us
 		user.RoleCode = "P"
 
 	case dto.Driver:
-		details, err := ParseDetails[dto.DriverDetailsRequestsDTO](user.Details)
+		details, err := parseDetails[dto.DriverDetailsRequestsDTO](user.Details)
 		if err != nil {
 			logger.LogError(err, "Invalid details format for Driver", map[string]interface{}{
 				"details": user.Details,
@@ -561,7 +639,7 @@ func validateUserRoleDetails(c *fiber.Ctx, user *dto.UserRequestsDTO, handler us
 	return nil
 }
 
-func ParseDetails[T any](details interface{}) (T, error) {
+func parseDetails[T any](details interface{}) (T, error) {
 	var parsedDetails T
 
 	detailsMap, ok := details.(map[string]interface{})
@@ -591,4 +669,24 @@ func isValidSortFieldForUsers(field string) bool {
 		"created_at":      true,
 	}
 	return allowedFields[field]
+}
+
+func safeString(value interface{}) string {
+	if str, ok := value.(string); ok {
+		return str
+	}
+	return ""
+}
+
+func convertToMap(data interface{}) (map[string]interface{}, error) {
+	bytes, err := json.Marshal(data)
+	if err != nil {
+		return nil, err
+	}
+	var result map[string]interface{}
+	err = json.Unmarshal(bytes, &result)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }

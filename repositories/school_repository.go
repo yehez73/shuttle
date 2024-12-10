@@ -1,15 +1,18 @@
 package repositories
 
 import (
+	"database/sql"
 	"fmt"
 	"shuttle/models/entity"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 )
 
 type SchoolRepositoryInterface interface {
-	FetchAllSchools(offset, limit int, sortField, sortDirection string) ([]entity.School, map[string]entity.SchoolAdminDetails, error)
-	FetchSpecSchool(uuid string) (entity.School, entity.SchoolAdminDetails, error)
+	FetchAllSchools(offset, limit int, sortField, sortDirection string) ([]entity.School, map[string][]entity.SchoolAdminDetails, error)
+	FetchSpecSchool(uuid string) (entity.School, []entity.SchoolAdminDetails, error)
 	SaveSchool(entity.School) error
 	UpdateSchool(entity.School) error
 	DeleteSchool(entity.School) error
@@ -26,17 +29,66 @@ func NewSchoolRepository(DB *sqlx.DB) SchoolRepositoryInterface {
 	}
 }
 
-func (repositories *schoolRepository) FetchAllSchools(offset, limit int, sortField, sortDirection string) ([]entity.School, map[string]entity.SchoolAdminDetails, error) {
-    var schools []entity.School
-	var adminMap = make(map[string]entity.SchoolAdminDetails)
+func (repositories *schoolRepository) FetchAllSchools(offset, limit int, sortField, sortDirection string) ([]entity.School, map[string][]entity.SchoolAdminDetails, error) {
+	var schools []entity.School
+	var adminMap = make(map[string][]entity.SchoolAdminDetails)
 
-    query := fmt.Sprintf(`
-        SELECT s.school_uuid, s.school_name, s.school_address, s.school_contact, s.school_email, s.created_at,
-		u.user_uuid, sad.school_uuid, sad.user_first_name, sad.user_last_name
+	query := fmt.Sprintf(`
+        SELECT 
+			s.school_uuid, 
+			s.school_name, 
+			s.school_address, 
+			s.school_contact, 
+			s.school_email, 
+			s.created_at,
+			COALESCE(
+				STRING_AGG(
+					CASE
+						WHEN u.deleted_at IS NULL THEN sad.user_uuid::TEXT
+						ELSE NULL
+					END, ', '
+				),
+				NULL
+			) AS user_uuids,
+			COALESCE(
+				STRING_AGG(
+					CASE
+						WHEN u.deleted_at IS NULL THEN sad.school_uuid::TEXT
+						ELSE NULL
+					END, ', '
+				),
+				NULL
+			) AS admin_school_uuids,
+			COALESCE(
+				STRING_AGG(
+					CASE
+						WHEN u.deleted_at IS NULL THEN sad.user_first_name
+						ELSE 'N/A'
+					END, ', '
+				),
+				'N/A'
+			) AS user_first_names,
+			COALESCE(
+				STRING_AGG(
+					CASE
+						WHEN u.deleted_at IS NULL THEN sad.user_last_name
+						ELSE 'N/A'
+					END, ', '
+				),
+				'N/A'
+			) AS user_last_names
 		FROM schools s
 		LEFT JOIN school_admin_details sad ON s.school_uuid = sad.school_uuid
 		LEFT JOIN users u ON sad.user_uuid = u.user_uuid
 		WHERE s.deleted_at IS NULL
+		GROUP BY
+			s.school_id,
+			s.school_uuid, 
+			s.school_name, 
+			s.school_address, 
+			s.school_contact, 
+			s.school_email, 
+			s.created_at
 		ORDER BY %s %s
 		LIMIT $1 OFFSET $2
 	`, sortField, sortDirection)
@@ -49,41 +101,125 @@ func (repositories *schoolRepository) FetchAllSchools(offset, limit int, sortFie
 
 	for rows.Next() {
 		var school entity.School
-		var admin entity.SchoolAdminDetails
-
+		var userUUIDs, adminSchoolUUIDs, firstNames, lastNames sql.NullString // Use NullString to handle NULL values
+	
 		if err := rows.Scan(&school.UUID, &school.Name, &school.Address, &school.Contact, &school.Email, &school.CreatedAt,
-			&admin.UserUUID, &admin.SchoolUUID, &admin.FirstName, &admin.LastName); err != nil {
+			&userUUIDs, &adminSchoolUUIDs, &firstNames, &lastNames); err != nil {
 			return nil, nil, err
 		}
 
 		schools = append(schools, school)
-		if admin.UserUUID.String() != "" {
-			adminMap[school.UUID.String()] = admin
+
+		// Handle the case when STRING_AGG result is NULL (which means no values)
+		if userUUIDs.Valid && userUUIDs.String != "" {
+			// Proses hasil `STRING_AGG` untuk memisahkan UUID individual
+			userUUIDList := strings.Split(userUUIDs.String, ", ")
+			adminSchoolUUIDList := strings.Split(adminSchoolUUIDs.String, ", ")
+			firstNameList := strings.Split(firstNames.String, ", ")
+			lastNameList := strings.Split(lastNames.String, ", ")
+
+			// Gabungkan menjadi detail admin
+			for i := range userUUIDList {
+				admin := entity.SchoolAdminDetails{
+					UserUUID:   uuid.MustParse(userUUIDList[i]),
+					SchoolUUID: uuid.MustParse(adminSchoolUUIDList[i]),
+					FirstName:  firstNameList[i],
+					LastName:   lastNameList[i],
+				}
+				adminMap[school.UUID.String()] = append(adminMap[school.UUID.String()], admin)
+			}
+		} else {
+			// If the userUUID is NULL, handle appropriately (e.g., no admins)
+			adminMap[school.UUID.String()] = []entity.SchoolAdminDetails{}
 		}
 	}
 
 	return schools, adminMap, nil
 }
 
-func (repositories *schoolRepository) FetchSpecSchool(uuid string) (entity.School, entity.SchoolAdminDetails, error) {
+func (repositories *schoolRepository) FetchSpecSchool(id string) (entity.School, []entity.SchoolAdminDetails, error) {
 	var school entity.School
-	var admin entity.SchoolAdminDetails
+	var admin []entity.SchoolAdminDetails
+	var userUUIDs, adminSchoolUUIDs, firstNames, lastNames sql.NullString // Use sql.NullString for nullable fields
 
 	query := `
 		SELECT s.school_uuid, s.school_name, s.school_address, s.school_contact, s.school_email, s.school_description, s.created_at,
 			s.created_by, s.updated_at, s.updated_by, 
-			sad.user_uuid, sad.school_uuid AS admin_school_uuid, sad.user_first_name, sad.user_last_name
+			COALESCE(
+				STRING_AGG(
+					CASE
+						WHEN u.deleted_at IS NULL THEN sad.user_uuid::TEXT
+						ELSE NULL
+					END, ', '
+				),
+				NULL
+			) AS user_uuids,
+			COALESCE(
+				STRING_AGG(
+					CASE
+						WHEN u.deleted_at IS NULL THEN sad.school_uuid::TEXT
+						ELSE NULL
+					END, ', '
+				),
+				NULL
+			) AS admin_school_uuids,
+			COALESCE(
+				STRING_AGG(
+					CASE
+						WHEN u.deleted_at IS NULL THEN sad.user_first_name
+						ELSE 'N/A'
+					END, ', '
+				),
+				'N/A'
+			) AS user_first_names,
+			COALESCE(
+				STRING_AGG(
+					CASE
+						WHEN u.deleted_at IS NULL THEN sad.user_last_name
+						ELSE 'N/A'
+					END, ', '
+				),
+				'N/A'
+			) AS user_last_names
 		FROM schools s
 		LEFT JOIN school_admin_details sad ON s.school_uuid = sad.school_uuid
+		LEFT JOIN users u ON sad.user_uuid = u.user_uuid
 		WHERE s.deleted_at IS NULL AND s.school_uuid = $1
+		GROUP BY
+			s.school_id,
+			s.school_uuid, 
+			s.school_name, 
+			s.school_address, 
+			s.school_contact, 
+			s.school_email, 
+			s.created_at
 	`
 
-	err := repositories.DB.QueryRowx(query, uuid).Scan(
+	err := repositories.DB.QueryRowx(query, id).Scan(
 		&school.UUID, &school.Name, &school.Address, &school.Contact, &school.Email, &school.Description, &school.CreatedAt,
-		&school.CreatedBy, &school.UpdatedAt, &school.UpdatedBy, &admin.UserUUID, &admin.SchoolUUID, &admin.FirstName, &admin.LastName,
+		&school.CreatedBy, &school.UpdatedAt, &school.UpdatedBy, &userUUIDs, &adminSchoolUUIDs, &firstNames, &lastNames,
 	)
 	if err != nil {
-		return entity.School{}, entity.SchoolAdminDetails{}, err
+		return entity.School{}, []entity.SchoolAdminDetails{}, err
+	}
+
+	// Check if the STRING_AGG values are valid and non-empty
+	if userUUIDs.Valid && userUUIDs.String != "" {
+		// Process STRING_AGG results into lists
+		userUUIDList := strings.Split(userUUIDs.String, ", ")
+		adminSchoolUUIDList := strings.Split(adminSchoolUUIDs.String, ", ")
+		firstNameList := strings.Split(firstNames.String, ", ")
+		lastNameList := strings.Split(lastNames.String, ", ")
+
+		// Add the first admin detail (if available) to the admin struct
+		for i := range userUUIDList {
+			admin = append(admin, entity.SchoolAdminDetails{
+				UserUUID:   uuid.MustParse(userUUIDList[i]),
+				SchoolUUID: uuid.MustParse(adminSchoolUUIDList[i]),
+				FirstName:  firstNameList[i],
+				LastName:   lastNameList[i],
+			})
+		}
 	}
 
 	return school, admin, nil
@@ -123,17 +259,17 @@ func (r *schoolRepository) DeleteSchool(school entity.School) error {
 }
 
 func (repositories *schoolRepository) CountSchools() (int, error) {
-    var total int
+	var total int
 
-    query := `
+	query := `
         SELECT COUNT(*) 
         FROM schools 
 		WHERE deleted_at IS NULL
     `
 
-    if err := repositories.DB.Get(&total, query); err != nil {
-        return 0, err
-    }
+	if err := repositories.DB.Get(&total, query); err != nil {
+		return 0, err
+	}
 
-    return total, nil
+	return total, nil
 }

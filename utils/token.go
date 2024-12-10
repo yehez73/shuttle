@@ -6,14 +6,13 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
-	"time"
 	"io"
+	"time"
 
 	"shuttle/databases"
 	"shuttle/logger"
 	"shuttle/models/entity"
 	"shuttle/repositories"
-
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
@@ -42,11 +41,11 @@ func init() {
 }
 
 // Signed Access Token
-func GenerateToken(userID, userUUID, name, role_code string) (string, error) {
+func GenerateToken(userID, userUUID, username, role_code string) (string, error) {
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":       userID,
 		"user_uuid": userUUID,
-		"user_name":  name,
+		"user_name": username,
 		"role_code": role_code,
 		"exp":       time.Now().Add(time.Hour * 6).Unix(), // 2 hours expiration
 	})
@@ -65,12 +64,12 @@ func GenerateToken(userID, userUUID, name, role_code string) (string, error) {
 }
 
 // Same, but with 15 days expiration time and for reissuing access token
-func GenerateRefreshToken(userID, userUUID, name, role_code string) (string, error) {
+func GenerateRefreshToken(userID, userUUID, username, role_code string) (string, error) {
 
 	refreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub":       userID,
 		"user_uuid": userUUID,
-		"user_name":  name,
+		"user_name": username,
 		"role_code": role_code,
 		"exp":       time.Now().Add(time.Hour * 24 * 15).Unix(), // 15 days expiration
 	})
@@ -155,19 +154,24 @@ func ValidateToken(encryptedToken string) (jwt.MapClaims, error) {
 	return nil, err
 }
 
-func SaveRefreshToken(userID int64, refreshToken string) error {
+func SaveRefreshToken(userUUID string, refreshToken string) error {
 	ID := time.Now().UnixMilli()*1e6 + int64(uuid.New().ID()%1e6)
 	expiration := time.Now().Add(time.Hour * 24 * 15)
 
+	parsedUUID, parseErr := uuid.Parse(userUUID)
+	if parseErr != nil {
+		return parseErr
+	}
+
 	err := repositories.SaveRefreshToken(*db, entity.RefreshToken{
-		ID:          ID,
-		UserID:      userID,
+		ID:           ID,
+		UserUUID:     parsedUUID,
 		RefreshToken: refreshToken,
-		ExpiredAt:   expiration,
+		ExpiredAt:    expiration,
 	})
 	if err != nil {
 		logger.LogError(err, "Failed to save refresh token", map[string]interface{}{
-			"user_id": userID,
+			"user_id": userUUID,
 		})
 		return err
 	}
@@ -179,8 +183,8 @@ var InvalidTokens = make(map[string]struct{})
 
 func InvalidateToken(token string) {
 	const bearerPrefix = "Bearer "
-    if len(token) > len(bearerPrefix) && token[:len(bearerPrefix)] == bearerPrefix {
-        token = token[len(bearerPrefix):]
-    }
+	if len(token) > len(bearerPrefix) && token[:len(bearerPrefix)] == bearerPrefix {
+		token = token[len(bearerPrefix):]
+	}
 	InvalidTokens[token] = struct{}{}
 }

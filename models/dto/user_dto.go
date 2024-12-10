@@ -35,12 +35,12 @@ type UserRequestsDTO struct {
 }
 
 type SchoolAdminDetailsRequestsDTO struct {
-	SchoolID string `json:"school_id" validate:"required"`
+	SchoolUUID string `json:"school_uuid" validate:"required"`
 }
 
 type DriverDetailsRequestsDTO struct {
-	SchoolID      string `json:"school_id"`
-	VehicleID     string `json:"vehicle_id"`
+	SchoolUUID    string `json:"school_uuid"`
+	VehicleUUID   string `json:"vehicle_uuid"`
 	LicenseNumber string `json:"license_number" validate:"required"`
 }
 

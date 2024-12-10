@@ -8,8 +8,7 @@ type LoginRequest struct {
 type UserDataOnLoginDTO struct {
 	UserID    int64  `json:"user_id"`
 	UserUUID  string `json:"user_uuid"`
+	Username  string `json:"user_username"`
 	RoleCode  string `json:"user_role_code"`
 	Password  string `json:"user_password"`
-	FirstName string `json:"user_first_name"`
-	LastName  string `json:"user_last_name"`
 }

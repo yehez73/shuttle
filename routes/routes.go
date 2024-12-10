@@ -20,7 +20,7 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	
 	userService := services.NewUserService(userRepository)
 	authService := services.NewAuthService(authRepository, userRepository)
-	schoolService := services.NewSchoolService(schoolRepository)
+	schoolService := services.NewSchoolService(schoolRepository, userRepository)
 	vehicleService := services.NewVehicleService(vehicleRepository)
 	
 	authHandler := handler.NewAuthHttpHandler(authService)
@@ -31,7 +31,7 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	wsService := utils.NewWebSocketService(userRepository, authRepository)
 	
 	// FOR PUBLIC
-	r.Post("/login", authHandler.Login)
+	r.Post("login", authHandler.Login)
 	r.Post("/refresh-token", authHandler.IssueNewAccessToken)
 	r.Static("/assets", "./assets")
 
@@ -58,41 +58,41 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	protectedSchoolAdmin.Use(middleware.AuthorizationMiddleware([]string{"AS"}))
 	protectedSchoolAdmin.Use(middleware.SchoolAdminMiddleware(userService))
 
-	// USER
+	// USER FOR SUPERADMIN
 	protectedSuperAdmin.Get("/user/sa/all", userHandler.GetAllSuperAdmin)
-	protectedSuperAdmin.Get("/user/sa/:id", userHandler.GetSpecSuperAdmin)
-
 	protectedSuperAdmin.Get("/user/as/all", userHandler.GetAllSchoolAdmin)
-	protectedSuperAdmin.Get("/user/as/:id", userHandler.GetSpecSchoolAdmin)
-
 	protectedSuperAdmin.Get("/user/driver/all", userHandler.GetAllPermittedDriver)
-	// protectedSuperAdmin.Get("/user/driver/:id", userHandler.GetSpecPermittedDriver)
-	
-	protectedSchoolAdmin.Get("/user/driver/all", userHandler.GetAllPermittedDriver)
-	// protectedSchoolAdmin.Get("/user/driver/:id", handler.GetSpecPermittedDriver)
-
+	protectedSuperAdmin.Get("/user/sa/:id", userHandler.GetSpecSuperAdmin)
+	protectedSuperAdmin.Get("/user/as/:id", userHandler.GetSpecSchoolAdmin)
+	protectedSuperAdmin.Get("/user/driver/:id", userHandler.GetSpecPermittedDriver)
 	protectedSuperAdmin.Post("/user/add", userHandler.AddUser)
-	// protectedSchoolAdmin.Post("/user/driver/add", handler.AddSchoolDriver)
-	
 	protectedSuperAdmin.Put("/user/update/:id", userHandler.UpdateUser)
-	// protectedSchoolAdmin.Put("/user/driver/update/:id", handler.UpdateSchoolDriver)
+	protectedSuperAdmin.Delete("/user/sa/delete/:id", userHandler.DeleteSuperAdmin)
+	protectedSuperAdmin.Delete("/user/as/delete/:id", userHandler.DeleteSchoolAdmin)
+	protectedSuperAdmin.Delete("/user/driver/delete/:id", userHandler.DeleteDriver)
 
-	protectedSuperAdmin.Delete("/user/delete/:id", handler.DeleteUser)
-	//protectedSchoolAdmin.Delete("/user/driver/delete/:id", handler.DeleteSchoolDriver)
-
-	// SCHOOL
+	// SCHOOL FOR SUPERADMIN
 	protectedSuperAdmin.Get("/school/all", schoolHandler.GetAllSchools)
 	protectedSuperAdmin.Get("/school/:id", schoolHandler.GetSpecSchool)
 	protectedSuperAdmin.Post("/school/add", schoolHandler.AddSchool)
 	protectedSuperAdmin.Put("/school/update/:id", schoolHandler.UpdateSchool)
 	protectedSuperAdmin.Delete("/school/delete/:id", schoolHandler.DeleteSchool)
-
+	
+	// VEHICLE FOR SUPERADMIN
 	protectedSuperAdmin.Get("/vehicle/all", vehicleHandler.GetAllVehicles)
 	protectedSuperAdmin.Get("/vehicle/:id", vehicleHandler.GetSpecVehicle)
 	protectedSuperAdmin.Post("/vehicle/add", vehicleHandler.AddVehicle)
 	protectedSuperAdmin.Put("/vehicle/update/:id", vehicleHandler.UpdateVehicle)
 	protectedSuperAdmin.Delete("/vehicle/delete/:id", vehicleHandler.DeleteVehicle)
 
+
+	////////////////////////////////////// SCHOOL ADMIN //////////////////////////////////////
+
+	protectedSchoolAdmin.Get("/user/driver/all", userHandler.GetAllPermittedDriver)
+	// protectedSchoolAdmin.Post("/user/driver/add", handler.AddSchoolDriver)
+	// protectedSchoolAdmin.Put("/user/driver/update/:id", handler.UpdateSchoolDriver)
+	//protectedSchoolAdmin.Delete("/user/driver/delete/:id", handler.DeleteSchoolDriver)
+	
 	// protectedSchoolAdmin.Get("/student/all", handler.GetAllStudentWithParents)
 	// protectedSchoolAdmin.Post("/student/add", handler.AddSchoolStudentWithParents)
 	// protectedSchoolAdmin.Put("/student/update/:id", handler.UpdateSchoolStudentWithParents)

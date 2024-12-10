@@ -53,24 +53,24 @@ func GetConnection(ID string) (*websocket.Conn, bool) {
 
 // Handle WebSocket connection
 func (s *WebSocketService) HandleWebSocketConnection(c *websocket.Conn) {
-	ID := c.Params("id")
+	UUID := c.Params("id")
 
-	_, err := s.userRepository.FetchSpecificUser(ID)
+	_, err := s.userRepository.FetchSpecificUser(UUID)
 	if err != nil {
 		logger.LogError(err, "Websocket Error Getting User", nil)
 		return
 	}
 
 	// Ensure only one connection per user
-	if existingConn, exists := GetConnection(ID); exists {
-		logger.LogInfo("Websocket Connection Already Exists, Closing Existing Connection", map[string]interface{}{"ID": ID})
+	if existingConn, exists := GetConnection(UUID); exists {
+		logger.LogInfo("Websocket Connection Already Exists, Closing Existing Connection", map[string]interface{}{"ID": UUID})
 		existingConn.Close()
 	}
 
-	AddConnection(ID, c)
-	logger.LogInfo("Websocket Connection Established", map[string]interface{}{"ID": ID})
+	AddConnection(UUID, c)
+	logger.LogInfo("Websocket Connection Established", map[string]interface{}{"ID": UUID})
 
-	err = s.authRepository.UpdateUserStatus(ID, "online", time.Time{})
+	err = s.authRepository.UpdateUserStatus(UUID, "online", time.Time{})
 	if err != nil {
 		logger.LogError(err, "Websocket Error Updating User Status", nil)
 	}
@@ -99,7 +99,7 @@ func (s *WebSocketService) HandleWebSocketConnection(c *websocket.Conn) {
 			break
 		}
 
-		logger.LogInfo("Websocket Message Parsed", map[string]interface{}{"ID": ID, "longitude": data.Longitude, "latitude": data.Latitude})
+		logger.LogInfo("Websocket Message Parsed", map[string]interface{}{"UUID": UUID, "longitude": data.Longitude, "latitude": data.Latitude})
 
 		response := struct {
 			Code    int    `json:"code"`
@@ -125,10 +125,10 @@ func (s *WebSocketService) HandleWebSocketConnection(c *websocket.Conn) {
 	}
 
 	// Disconnect user
-	RemoveConnection(ID)
-	logger.LogInfo("Websocket Connection Closed", map[string]interface{}{"ID": ID})
+	RemoveConnection(UUID)
+	logger.LogInfo("Websocket Connection Closed", map[string]interface{}{"ID": UUID})
 
-	err = s.authRepository.UpdateUserStatus(ID, "offline", time.Now())
+	err = s.authRepository.UpdateUserStatus(UUID, "offline", time.Now())
 	if err != nil {
 		logger.LogError(err, "Websocket Error Updating User Status", nil)
 	}

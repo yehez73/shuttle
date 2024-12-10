@@ -10,6 +10,7 @@ import (
 
 type VehicleRepositoryInterface interface {
 	CountVehicles() (int, error)
+	CheckVehicleNumberExists(uuid ,vehicleNumber string) (bool, error)
 
 	FetchAllVehicles(offset, limit int, sortField, sortDirection string) ([]entity.Vehicle, map[string]entity.School, map[string]entity.DriverDetails, error)
 	FetchSpecVehicle(uuid string) (entity.Vehicle, entity.School, entity.DriverDetails, error)
@@ -45,6 +46,29 @@ func (repository *VehicleRepository) CountVehicles() (int, error) {
 	return count, nil
 }
 
+func (repository *VehicleRepository) CheckVehicleNumberExists(uuid, vehicleNumber string) (bool, error) {
+	var count int
+
+	query := `
+		SELECT COUNT(vehicle_id)
+		FROM vehicles
+		WHERE vehicle_number = $1 AND deleted_at IS NULL
+	`
+
+	if uuid != "" {
+		query += ` AND vehicle_uuid != $2`
+		if err := repository.db.Get(&count, query, vehicleNumber, uuid); err != nil {
+			return false, err
+		}
+	} else {
+		if err := repository.db.Get(&count, query, vehicleNumber); err != nil {
+			return false, err
+		}
+	}
+
+	return count > 0, nil
+}
+
 func (repository *VehicleRepository) FetchAllVehicles(offset, limit int, sortField, sortDirection string) ([]entity.Vehicle, map[string]entity.School, map[string]entity.DriverDetails, error) {
     var vehicles []entity.Vehicle
     var schoolsMap = make(map[string]entity.School)
@@ -56,14 +80,40 @@ func (repository *VehicleRepository) FetchAllVehicles(offset, limit int, sortFie
 			v.vehicle_name, v.vehicle_number, 
             v.vehicle_type, v.vehicle_color, v.vehicle_seats, v.vehicle_status, 
             v.created_at, 
-            COALESCE(s.school_uuid, NULL) AS school_uuid, 
-            COALESCE(s.school_name, 'N/A') AS school_name,
-			COALESCE(d.user_uuid, NULL) AS driver_uuid,
-			COALESCE(d.user_first_name, 'N/A') AS driver_first_name,
-			COALESCE(d.user_last_name, 'N/A') AS driver_last_name
+			COALESCE(
+				CASE
+					WHEN s.deleted_at IS NULL THEN s.school_uuid
+				END, 
+				NULL
+			) AS school_uuid,
+			COALESCE(
+				CASE
+					WHEN s.deleted_at IS NULL THEN s.school_name
+				END,
+				'N/A'
+			) AS school_name,
+			COALESCE(
+				CASE
+					WHEN u.deleted_at IS NULL THEN d.user_uuid
+				END,
+				NULL
+			) AS driver_uuid,
+			COALESCE(
+				CASE
+					WHEN u.deleted_at IS NULL THEN d.user_first_name
+				END,
+				'N/A'
+			) AS driver_first_name,
+			COALESCE(
+				CASE
+					WHEN u.deleted_at IS NULL THEN d.user_last_name
+				END,
+				'N/A'
+			) AS driver_last_name
         FROM vehicles v
         LEFT JOIN schools s ON v.school_uuid = s.school_uuid
 		LEFT JOIN driver_details d ON v.driver_uuid = d.user_uuid
+		LEFT JOIN users u ON d.user_uuid = u.user_uuid
         WHERE v.deleted_at IS NULL
         ORDER BY %s %s
         LIMIT $1 OFFSET $2
@@ -111,11 +161,40 @@ func (repository *VehicleRepository) FetchSpecVehicle(uuid string) (entity.Vehic
 			v.vehicle_uuid, v.school_uuid, v.driver_uuid, v.vehicle_name, v.vehicle_number,
 			v.vehicle_type, v.vehicle_color, v.vehicle_seats, v.vehicle_status,
 			v.created_at, v.created_by, v.updated_at, v.updated_by,
-			COALESCE(s.school_uuid, NULL) AS school_uuid, COALESCE(s.school_name, 'N/A') AS school_name,
-			COALESCE(d.user_uuid, NULL) AS driver_uuid, COALESCE(d.user_first_name, 'N/A') AS driver_first_name, COALESCE(d.user_last_name, 'N/A') AS driver_last_name
+			COALESCE(
+				CASE
+					WHEN s.deleted_at IS NULL THEN s.school_uuid
+				END, 
+				NULL
+			) AS school_uuid,
+			COALESCE(
+				CASE
+					WHEN s.deleted_at IS NULL THEN s.school_name
+				END,
+				'N/A'
+			) AS school_name,
+			COALESCE(
+				CASE
+					WHEN u.deleted_at IS NULL THEN d.user_uuid
+				END,
+				NULL
+			) AS driver_uuid,
+			COALESCE(
+				CASE
+					WHEN u.deleted_at IS NULL THEN d.user_first_name
+				END,
+				'N/A'
+			) AS driver_first_name,
+			COALESCE(
+				CASE
+					WHEN u.deleted_at IS NULL THEN d.user_last_name
+				END,
+				'N/A'
+			) AS driver_last_name
 		FROM vehicles v
 		LEFT JOIN schools s ON v.school_uuid = s.school_uuid
 		LEFT JOIN driver_details d ON v.driver_uuid = d.user_uuid
+		LEFT JOIN users u ON d.user_uuid = u.user_uuid
 		WHERE v.deleted_at IS NULL AND v.vehicle_uuid = $1
 	`
 

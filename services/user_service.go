@@ -1,7 +1,6 @@
 package services
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"strconv"
@@ -16,9 +15,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
-	"github.com/spf13/viper"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 type UserServiceInterface interface {
@@ -29,9 +25,15 @@ type UserServiceInterface interface {
 
 	GetAllDriverFromAllSchools(page int, limit int, sortField string, sortDirection string) ([]dto.UserResponseDTO, error)
 	GetAllDriverForPermittedSchool(page int, limit int, sortField string, sortDirection string, schoolUUID string) ([]dto.UserResponseDTO, int, error)
+	GetSpecDriverFromAllSchools(uuid string) (dto.UserResponseDTO, error)
 
 	AddUser(user entity.User, user_name string) (uuid.UUID, error)
 	UpdateUser(id string, user dto.UserRequestsDTO, user_name string, file []byte) error
+
+	DeleteSuperAdmin(id string, user_name string) error
+	DeleteSchoolAdmin(id string, user_name string) error
+	DeleteDriver(id string, user_name string) error
+
 	GetSpecUser(id string) (entity.User, error)
 	GetSpecUserWithDetails(id string) (entity.User, error)
 
@@ -86,44 +88,6 @@ func (service *UserService) GetAllSuperAdmin(page int, limit int, sortField, sor
 	return usersDTO, total, nil
 }
 
-func (service *UserService) GetSpecSuperAdmin(uuid string) (dto.UserResponseDTO, error) {
-	user, err := service.userRepository.FetchSpecSuperAdmin(uuid)
-	if err != nil {
-		return dto.UserResponseDTO{}, err
-	}
-
-	userDTO := dto.UserResponseDTO{
-		UUID:       user.UUID.String(),
-		Username:   user.Username,
-		Email:      user.Email,
-		Status:     user.Status,
-		LastActive: safeTimeFormat(user.LastActive),
-		CreatedAt:  safeTimeFormat(user.CreatedAt),
-		CreatedBy:  safeStringFormat(user.CreatedBy),
-		UpdatedAt:  safeTimeFormat(user.UpdatedAt),
-		UpdatedBy:  safeStringFormat(user.UpdatedBy),
-	}
-
-	if details, ok := user.Details.(entity.SuperAdminDetails); ok {
-		var Picture string
-		if details.Picture == "" {
-			Picture = "N/A"
-		} else {
-			Picture = details.Picture
-		}
-		userDTO.Details = dto.SuperAdminDetailsResponseDTO{
-			Picture:   Picture,
-			FirstName: details.FirstName,
-			LastName:  details.LastName,
-			Gender:    dto.Gender(details.Gender),
-			Phone:     details.Phone,
-			Address:   details.Address,
-		}
-	}
-
-	return userDTO, nil
-}
-
 func (service *UserService) GetAllSchoolAdmin(page int, limit int, sortField, sortDirection string) ([]dto.UserResponseDTO, int, error) {
 	offset := (page - 1) * limit
 
@@ -164,40 +128,6 @@ func (service *UserService) GetAllSchoolAdmin(page int, limit int, sortField, so
 	return usersDTO, total, nil
 }
 
-func (service *UserService) GetSpecSchoolAdmin(uuid string) (dto.UserResponseDTO, error) {
-	user, school, err := service.userRepository.FetchSpecSchoolAdmin(uuid)
-	if err != nil {
-		return dto.UserResponseDTO{}, err
-	}
-
-	userDTO := dto.UserResponseDTO{
-		UUID:       user.UUID.String(),
-		Username:   user.Username,
-		Email:      user.Email,
-		Status:     user.Status,
-		LastActive: safeTimeFormat(user.LastActive),
-		CreatedAt:  safeTimeFormat(user.CreatedAt),
-		CreatedBy:  safeStringFormat(user.CreatedBy),
-		UpdatedAt:  safeTimeFormat(user.UpdatedAt),
-		UpdatedBy:  safeStringFormat(user.UpdatedBy),
-	}
-
-	if details, ok := user.Details.(entity.SchoolAdminDetails); ok {
-		userDTO.Details = dto.SchoolAdminDetailsResponseDTO{
-			SchoolUUID: details.SchoolUUID.String(),
-			SchoolName: school.Name,
-			Picture:    details.Picture,
-			FirstName:  details.FirstName,
-			LastName:   details.LastName,
-			Gender:     dto.Gender(details.Gender),
-			Phone:      details.Phone,
-			Address:    details.Address,
-		}
-	}
-
-	return userDTO, nil
-}
-
 func (service *UserService) GetAllDriverFromAllSchools(page int, limit int, sortField string, sortDirection string) ([]dto.UserResponseDTO, int, error) {
 	offset := (page - 1) * limit
 
@@ -206,7 +136,7 @@ func (service *UserService) GetAllDriverFromAllSchools(page int, limit int, sort
 		return nil, 0, err
 	}
 
-	total, err := service.userRepository.CountSchoolAdmin()
+	total, err := service.userRepository.CountAllDriver()
 	if err != nil {
 		return nil, 0, err
 	}
@@ -291,76 +221,132 @@ func (service *UserService) GetAllDriverForPermittedSchool(page int, limit int, 
 	return usersDTO, total, nil
 }
 
-func (service *UserService) GetSpecUserWithDetails(id string) (entity.User, error) {
-	user, err := service.userRepository.FetchSpecificUser(id)
+func (service *UserService) GetSpecSuperAdmin(uuid string) (dto.UserResponseDTO, error) {
+	user, err := service.userRepository.FetchSpecSuperAdmin(uuid)
 	if err != nil {
-		return entity.User{}, err
+		return dto.UserResponseDTO{}, err
 	}
-	switch user.RoleCode {
-	case "SA":
-		superAdminDetails, err := service.userRepository.FetchSuperAdminDetails(user.UUID)
-		if err != nil {
-			return entity.User{}, err
-		}
-		user.Details = superAdminDetails
-		return user, nil
-	case "AS":
-		schoolAdminDetails, err := service.userRepository.FetchSchoolAdminDetails(user.UUID)
-		if err != nil {
-			return entity.User{}, err
-		}
-		user.Details = schoolAdminDetails
-		return user, nil
-	case "P":
-		parentDetails, err := service.userRepository.FetchParentDetails(user.UUID)
-		if err != nil {
-			return entity.User{}, err
-		}
-		user.Details = parentDetails
-		return user, nil
-	case "D":
-		driverDetails, err := service.userRepository.FetchDriverDetails(user.UUID)
-		if err != nil {
-			return entity.User{}, err
-		}
-		user.Details = driverDetails
-		return user, nil
-	default:
-		return entity.User{}, errors.New("invalid role code", 0)
+
+	userDTO := dto.UserResponseDTO{
+		UUID:       user.UUID.String(),
+		Username:   user.Username,
+		Email:      user.Email,
+		Status:     user.Status,
+		LastActive: safeTimeFormat(user.LastActive),
+		CreatedAt:  safeTimeFormat(user.CreatedAt),
+		CreatedBy:  safeStringFormat(user.CreatedBy),
+		UpdatedAt:  safeTimeFormat(user.UpdatedAt),
+		UpdatedBy:  safeStringFormat(user.UpdatedBy),
 	}
+
+	if details, ok := user.Details.(entity.SuperAdminDetails); ok {
+		var Picture string
+		if details.Picture == "" {
+			Picture = "N/A"
+		} else {
+			Picture = details.Picture
+		}
+		userDTO.Details = dto.SuperAdminDetailsResponseDTO{
+			Picture:   Picture,
+			FirstName: details.FirstName,
+			LastName:  details.LastName,
+			Gender:    dto.Gender(details.Gender),
+			Phone:     details.Phone,
+			Address:   details.Address,
+		}
+	}
+
+	return userDTO, nil
 }
 
-func (service *UserService) GetSpecUser(id string) (entity.User, error) {
-	db, err := databases.PostgresConnection()
+func (service *UserService) GetSpecSchoolAdmin(uuid string) (dto.UserResponseDTO, error) {
+	user, school, err := service.userRepository.FetchSpecSchoolAdmin(uuid)
 	if err != nil {
-		return entity.User{}, err
+		return dto.UserResponseDTO{}, err
 	}
 
-	idInt, err := strconv.ParseInt(id, 10, 64)
-	if err != nil {
-		return entity.User{}, errors.New("invalid user id", 0)
+	userDTO := dto.UserResponseDTO{
+		UUID:       user.UUID.String(),
+		Username:   user.Username,
+		Email:      user.Email,
+		Status:     user.Status,
+		LastActive: safeTimeFormat(user.LastActive),
+		CreatedAt:  safeTimeFormat(user.CreatedAt),
+		CreatedBy:  safeStringFormat(user.CreatedBy),
+		UpdatedAt:  safeTimeFormat(user.UpdatedAt),
+		UpdatedBy:  safeStringFormat(user.UpdatedBy),
 	}
 
-	var user entity.User
-	query := `
-		SELECT * FROM users WHERE user_id = $1
-	`
-
-	err = db.Get(&user, query, idInt)
-	if err != nil {
-		return entity.User{}, err
+	if details, ok := user.Details.(entity.SchoolAdminDetails); ok {
+		userDTO.Details = dto.SchoolAdminDetailsResponseDTO{
+			SchoolUUID: details.SchoolUUID.String(),
+			SchoolName: school.Name,
+			Picture:    details.Picture,
+			FirstName:  details.FirstName,
+			LastName:   details.LastName,
+			Gender:     dto.Gender(details.Gender),
+			Phone:      details.Phone,
+			Address:    details.Address,
+		}
 	}
 
-	return user, nil
+	return userDTO, nil
 }
 
-func (service *UserService) CheckPermittedSchoolAccess(userUUID string) (string, error) {
-	schoolUUID, err := service.userRepository.FetchPermittedSchoolAccess(userUUID)
+func (service *UserService) GetSpecDriverFromAllSchools(id string) (dto.UserResponseDTO, error) {
+	user, school, vehicle, err := service.userRepository.FetchSpecDriverFromAllSchools(id)
 	if err != nil {
-		return "", err
+		return dto.UserResponseDTO{}, err
 	}
 
-	return schoolUUID, nil
+	userDTO := dto.UserResponseDTO{
+		UUID:       user.UUID.String(),
+		Username:   user.Username,
+		Email:      user.Email,
+		Status:     user.Status,
+		LastActive: safeTimeFormat(user.LastActive),
+		CreatedAt:  safeTimeFormat(user.CreatedAt),
+		CreatedBy:  safeStringFormat(user.CreatedBy),
+		UpdatedAt:  safeTimeFormat(user.UpdatedAt),
+		UpdatedBy:  safeStringFormat(user.UpdatedBy),
+	}
+
+	if details, ok := user.Details.(entity.DriverDetails); ok {
+		var vehicleDetails, schoolUUID, vehicleUUID string
+		if vehicle.VehicleNumber == "N/A" || vehicle.UUID == uuid.Nil {
+			vehicleDetails = "N/A"
+		} else {
+			vehicleDetails = fmt.Sprintf("%s (%s)", vehicle.VehicleNumber, vehicle.VehicleName)
+		}
+
+		if school.UUID == uuid.Nil {
+			schoolUUID = "N/A"
+		} else {
+			schoolUUID = school.UUID.String()
+		}
+
+		if vehicle.UUID == uuid.Nil {
+			vehicleUUID = "N/A"
+		} else {
+			vehicleUUID = vehicle.UUID.String()
+		}
+
+		userDTO.Details = dto.DriverDetailsResponseDTO{
+			SchoolUUID:    schoolUUID,
+			SchoolName:    school.Name,
+			VehicleUUID:   vehicleUUID,
+			VehicleNumber: vehicleDetails,
+			Picture:       details.Picture,
+			FirstName:     details.FirstName,
+			LastName:      details.LastName,
+			Gender:        dto.Gender(details.Gender),
+			Phone:         details.Phone,
+			Address:       details.Address,
+			LicenseNumber: details.LicenseNumber,
+		}
+	}
+
+	return userDTO, nil
 }
 
 func (s *UserService) AddUser(req dto.UserRequestsDTO, user_name string) (uuid.UUID, error) {
@@ -506,31 +492,164 @@ func (s *UserService) UpdateUser(id string, req dto.UserRequestsDTO, username st
 	return nil
 }
 
-func DeleteUser(id string) error {
-	client, err := databases.MongoConnection()
+func (service *UserService) DeleteSuperAdmin(id string, user_name string) error {
+	tx, err := service.userRepository.BeginTransaction()
 	if err != nil {
-		return err
+		return fmt.Errorf("error beginning transaction: %w", err)
 	}
 
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		} else {
+			err = tx.Commit()
+		}
+	}()
 
-	objectID, err := primitive.ObjectIDFromHex(id)
+	parsedUUID, err := uuid.Parse(id)
 	if err != nil {
-		return err
+		return errors.New("user not found", 404)
 	}
 
-	var user entity.User
-	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
+	err = service.userRepository.DeleteSuperAdmin(tx, parsedUUID, user_name)
 	if err != nil {
-		return err
-	}
-
-	_, err = collection.DeleteOne(context.Background(), bson.M{"_id": objectID})
-	if err != nil {
-		return err
+		return errors.New("user not found", 404)
 	}
 
 	return nil
+}
+
+func (service *UserService) DeleteSchoolAdmin(id string, user_name string) error {
+	tx, err := service.userRepository.BeginTransaction()
+	if err != nil {
+		return fmt.Errorf("error beginning transaction: %w", err)
+	}
+
+	var transactionErr error
+	defer func() {
+		if transactionErr != nil {
+			tx.Rollback()
+		} else {
+			transactionErr = tx.Commit()
+		}
+	}()
+
+	parsedUUID, err := uuid.Parse(id)
+	if err != nil {
+		transactionErr = errors.New("user not found", 404)
+		return transactionErr
+	}
+
+	err = service.userRepository.DeleteSchoolAdmin(tx, parsedUUID, user_name)
+	if err != nil {
+		transactionErr = errors.New("user not found", 404)
+		return transactionErr
+	}
+
+	return nil
+}
+
+func (service *UserService) DeleteDriver(id string, user_name string) error {
+	tx, err := service.userRepository.BeginTransaction()
+	if err != nil {
+		return fmt.Errorf("error beginning transaction: %w", err)
+	}
+
+	var transactionErr error
+	defer func() {
+		if transactionErr != nil {
+			tx.Rollback()
+		} else {
+			transactionErr = tx.Commit()
+		}
+	}()
+
+	parsedUUID, err := uuid.Parse(id)
+	if err != nil {
+		transactionErr = errors.New("user not found", 404)
+		return transactionErr
+	}
+
+	err = service.userRepository.DeleteDriver(tx, parsedUUID, user_name)
+	if err != nil {
+		transactionErr = errors.New("user not found", 404)
+		return transactionErr
+	}
+
+	return nil
+}
+
+
+func (service *UserService) GetSpecUserWithDetails(id string) (entity.User, error) {
+	user, err := service.userRepository.FetchSpecificUser(id)
+	if err != nil {
+		return entity.User{}, err
+	}
+	switch user.RoleCode {
+	case "SA":
+		superAdminDetails, err := service.userRepository.FetchSuperAdminDetails(user.UUID)
+		if err != nil {
+			return entity.User{}, err
+		}
+		user.Details = superAdminDetails
+		return user, nil
+	case "AS":
+		schoolAdminDetails, err := service.userRepository.FetchSchoolAdminDetails(user.UUID)
+		if err != nil {
+			return entity.User{}, err
+		}
+		user.Details = schoolAdminDetails
+		return user, nil
+	case "P":
+		parentDetails, err := service.userRepository.FetchParentDetails(user.UUID)
+		if err != nil {
+			return entity.User{}, err
+		}
+		user.Details = parentDetails
+		return user, nil
+	case "D":
+		driverDetails, err := service.userRepository.FetchDriverDetails(user.UUID)
+		if err != nil {
+			return entity.User{}, err
+		}
+		user.Details = driverDetails
+		return user, nil
+	default:
+		return entity.User{}, errors.New("invalid role code", 0)
+	}
+}
+
+func (service *UserService) GetSpecUser(id string) (entity.User, error) {
+	db, err := databases.PostgresConnection()
+	if err != nil {
+		return entity.User{}, err
+	}
+
+	idInt, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		return entity.User{}, errors.New("invalid user id", 0)
+	}
+
+	var user entity.User
+	query := `
+		SELECT * FROM users WHERE user_id = $1
+	`
+
+	err = db.Get(&user, query, idInt)
+	if err != nil {
+		return entity.User{}, err
+	}
+
+	return user, nil
+}
+
+func (service *UserService) CheckPermittedSchoolAccess(userUUID string) (string, error) {
+	schoolUUID, err := service.userRepository.FetchPermittedSchoolAccess(userUUID)
+	if err != nil {
+		return "", err
+	}
+
+	return schoolUUID, nil
 }
 
 func (s *UserService) saveRoleDetails(tx *sqlx.Tx, userEntity entity.User, req dto.UserRequestsDTO) error {
@@ -552,7 +671,7 @@ func (s *UserService) saveRoleDetails(tx *sqlx.Tx, userEntity entity.User, req d
 		}
 	case entity.SchoolAdmin:
 		details := entity.SchoolAdminDetails{
-			SchoolUUID: uuid.MustParse(req.Details.(dto.SchoolAdminDetailsRequestsDTO).SchoolID),
+			SchoolUUID: uuid.MustParse(req.Details.(dto.SchoolAdminDetailsRequestsDTO).SchoolUUID),
 			Picture:    req.Picture,
 			FirstName:  req.FirstName,
 			LastName:   req.LastName,
@@ -579,8 +698,8 @@ func (s *UserService) saveRoleDetails(tx *sqlx.Tx, userEntity entity.User, req d
 		}
 	case entity.Driver:
 		details := entity.DriverDetails{
-			SchoolUUID:    parseSafeUUID(req.Details.(dto.DriverDetailsRequestsDTO).SchoolID),
-			VehicleUUID:   parseSafeUUID(req.Details.(dto.DriverDetailsRequestsDTO).VehicleID),
+			SchoolUUID:    parseSafeUUID(req.Details.(dto.DriverDetailsRequestsDTO).SchoolUUID),
+			VehicleUUID:   parseSafeUUID(req.Details.(dto.DriverDetailsRequestsDTO).VehicleUUID),
 			Picture:       req.Picture,
 			FirstName:     req.FirstName,
 			LastName:      req.LastName,
@@ -617,7 +736,7 @@ func (s *UserService) updateRoleDetails(tx *sqlx.Tx, userEntity entity.User, req
 		}
 	case entity.SchoolAdmin:
 		details := entity.SchoolAdminDetails{
-			SchoolUUID: *parseSafeUUID(req.Details.(dto.SchoolAdminDetailsRequestsDTO).SchoolID),
+			SchoolUUID: *parseSafeUUID(req.Details.(dto.SchoolAdminDetailsRequestsDTO).SchoolUUID),
 			Picture:    req.Picture,
 			FirstName:  req.FirstName,
 			LastName:   req.LastName,
@@ -644,8 +763,8 @@ func (s *UserService) updateRoleDetails(tx *sqlx.Tx, userEntity entity.User, req
 		}
 	case entity.Driver:
 		details := entity.DriverDetails{
-			SchoolUUID:    parseSafeUUID(req.Details.(dto.DriverDetailsRequestsDTO).SchoolID),
-			VehicleUUID:   parseSafeUUID(req.Details.(dto.DriverDetailsRequestsDTO).VehicleID),
+			SchoolUUID:    parseSafeUUID(req.Details.(dto.DriverDetailsRequestsDTO).SchoolUUID),
+			VehicleUUID:   parseSafeUUID(req.Details.(dto.DriverDetailsRequestsDTO).VehicleUUID),
 			Picture:       req.Picture,
 			FirstName:     req.FirstName,
 			LastName:      req.LastName,
@@ -655,7 +774,12 @@ func (s *UserService) updateRoleDetails(tx *sqlx.Tx, userEntity entity.User, req
 			LicenseNumber: req.Details.(dto.DriverDetailsRequestsDTO).LicenseNumber,
 		}
 
-		if err := s.userRepository.UpdateDriverDetails(tx, details, id); err != nil {
+		parsedUUID, err := uuid.Parse(id)
+		if err != nil {
+			return fmt.Errorf("invalid UUID: %w", err)
+		}
+
+		if err := s.userRepository.UpdateDriverDetails(tx, details, parsedUUID); err != nil {
 			return err
 		}
 	default:

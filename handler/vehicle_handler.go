@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"shuttle/errors"
 	"shuttle/logger"
 	"shuttle/models/dto"
 	"shuttle/services"
@@ -92,7 +93,7 @@ func (handler *vehicleHandler) GetAllVehicles(c *fiber.Ctx) error {
         },
     }
 
-    return utils.SuccessResponse(c, "Schools fetched successfully", response)
+    return utils.SuccessResponse(c, "Vehicles fetched successfully", response)
 }
 
 func (handler *vehicleHandler) GetSpecVehicle(c *fiber.Ctx) error {
@@ -117,7 +118,9 @@ func (handler *vehicleHandler) AddVehicle(c *fiber.Ctx) error {
 	}
 
 	if err := handler.vehicleService.AddVehicle(*vehicle); err != nil {
-		logger.LogError(err, "Failed to create vehicle", nil)
+		if customErr, ok := err.(*errors.CustomError); ok {
+			return utils.ErrorResponse(c, customErr.StatusCode, strings.ToUpper(string(customErr.Message[0]))+customErr.Message[1:], nil)
+		}
 		return utils.ErrorResponse(c, http.StatusInternalServerError, "Something went wrong, please try again later", nil)
 	}
 
@@ -138,7 +141,9 @@ func (handler *vehicleHandler) UpdateVehicle(c *fiber.Ctx) error {
     }
 
     if err := handler.vehicleService.UpdateVehicle(id, *vehicle, username); err != nil {
-        logger.LogError(err, "Failed to update vehicle", nil)
+        if customErr, ok := err.(*errors.CustomError); ok {
+            return utils.ErrorResponse(c, customErr.StatusCode, strings.ToUpper(string(customErr.Message[0]))+customErr.Message[1:], nil)
+        }
         return utils.ErrorResponse(c, http.StatusInternalServerError, "Something went wrong, please try again later", nil)
     }
 
