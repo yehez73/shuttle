@@ -87,7 +87,10 @@ func (handler *userHandler) GetAllSuperAdmin(c *fiber.Ctx) error {
 		start = 0
 	}
 
-	end := limit
+	end := start + len(users) - 1
+	if end > totalItems {
+		end = totalItems
+	}
 
 	if len(users) == 0 {
 		start = 0
@@ -151,7 +154,10 @@ func (handler *userHandler) GetAllSchoolAdmin(c *fiber.Ctx) error {
 		start = 0
 	}
 
-	end := limit
+	end := start + len(users) - 1
+	if end > totalItems {
+		end = totalItems
+	}
 
 	if len(users) == 0 {
 		start = 0
@@ -219,7 +225,10 @@ func (handler *userHandler) GetAllPermittedDriver(c *fiber.Ctx) error {
 			start = 0
 		}
 
-		end := limit
+		end := start + len(users) - 1
+		if end > totalItems {
+			end = totalItems
+		}
 
 		if len(users) == 0 {
 			start = 0
@@ -239,10 +248,10 @@ func (handler *userHandler) GetAllPermittedDriver(c *fiber.Ctx) error {
 
 		return utils.SuccessResponse(c, "Users fetched successfully", response)
 	case "AS":
-        schoolUUID, ok := c.Locals("schoolUUID").(string)
-        if !ok {
-            return utils.BadRequestResponse(c, "Token is invalid", nil)
-        }
+		schoolUUID, ok := c.Locals("schoolUUID").(string)
+		if !ok {
+			return utils.BadRequestResponse(c, "Token is invalid", nil)
+		}
 
 		users, totalItems, err := handler.userService.GetAllDriverForPermittedSchool(page, limit, sortField, sortDirection, schoolUUID)
 		if err != nil {
