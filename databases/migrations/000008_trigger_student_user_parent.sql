@@ -6,10 +6,12 @@ RETURNS TRIGGER AS $$
 BEGIN
     -- Cek apakah orang tua (parent_uuid) masih dirujuk oleh siswa lain
     IF NOT EXISTS (
-        SELECT 1 FROM students WHERE parent_uuid = OLD.parent_uuid
+        SELECT 1 FROM students WHERE parent_uuid = OLD.parent_uuid AND deleted_at IS NULL
     ) THEN
-        -- Jika tidak ada siswa lain yang merujuk, hapus orang tua
-        DELETE FROM users WHERE user_uuid = OLD.parent_uuid;
+        -- Jika tidak ada siswa lain yang merujuk, hapus orang tua (dengan mengatur deleted_at)
+        UPDATE users
+        SET deleted_at = NOW(), deleted_by = 'Auto Delete'
+        WHERE user_uuid = OLD.parent_uuid;
     END IF;
     RETURN NULL;
 END;
@@ -17,8 +19,9 @@ $$ LANGUAGE plpgsql;
 
 -- Membuat trigger pada tabel students untuk memanggil fungsi
 CREATE TRIGGER check_and_delete_parent_with_no_associated_student
-AFTER DELETE ON students
+AFTER UPDATE ON students
 FOR EACH ROW
+WHEN (OLD.deleted_at IS DISTINCT FROM NEW.deleted_at) -- Pastikan hanya jika deleted_at berubah
 EXECUTE FUNCTION delete_parent_with_no_associated_student();
 -- +goose StatementEnd
 

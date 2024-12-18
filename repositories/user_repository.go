@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"shuttle/models/entity"
 
@@ -11,16 +12,18 @@ import (
 
 type UserRepositoryInterface interface {
 	// Might need to move this to a different repository
-	FetchAllDriversForPermittedSchool(offset int, limit int, sortField string, sortDirection string, userUUID string) ([]entity.User, entity.School, entity.Vehicle, error)
+	FetchAllDriversForPermittedSchool(offset, limit int, sortField, sortDirection, schoolUUID string) ([]entity.User, entity.School, entity.Vehicle, error)
 	FetchPermittedSchoolAccess(userUUID string) (string, error)
-	
+	FetchSpecDriverForPermittedSchool(userUUID, schoolUUID string) (entity.User, entity.School, entity.Vehicle, error)
+	CountAllPermittedDriver(schoolUUID string) (int, error)
+
 	BeginTransaction() (*sqlx.Tx, error)
 	FetchSpecificUser(userUUID string) (entity.User, error)
 	CheckEmailExist(uuid string, email string) (bool, error)
 	CheckUsernameExist(uuid string, username string) (bool, error)
+	FetchUUIDByEmail(email string) (uuid.UUID, error)
 	CountSuperAdmin() (int, error)
 	CountSchoolAdmin() (int, error)
-	CountAllDriver() (int, error)
 
 	FetchAllSuperAdmins(offset, limit int, sortField, sortDirection string) ([]entity.User, error)
 	FetchAllSchoolAdmins(offset, limit int, sortField, sortDirection string) ([]entity.User, entity.School, error)
@@ -62,64 +65,169 @@ func NewUserRepository(DB *sqlx.DB) UserRepositoryInterface {
 	}
 }
 
-func (r *userRepository) FetchAllDriversForPermittedSchool(offset int, limit int, sortField string, sortDirection string, userUUID string) ([]entity.User, entity.School, entity.Vehicle, error) {
-    var users []entity.User
-    var user entity.User
-    var details entity.DriverDetails
-    var school entity.School
-    var vehicle entity.Vehicle
+func (r *userRepository) FetchAllDriversForPermittedSchool(offset, limit int, sortField, sortDirection, schoolUUID string) ([]entity.User, entity.School, entity.Vehicle, error) {
+	var users []entity.User
+	var user entity.User
+	var details entity.DriverDetails
+	var school entity.School
+	var vehicle entity.Vehicle
 
-    query := fmt.Sprintf(`
+	query := fmt.Sprintf(`
         SELECT
-            u.user_uuid, u.user_username, u.user_email, u.user_status, u.user_last_active, u.created_at, u.created_by,
-            d.school_uuid, d.vehicle_uuid, d.user_picture, d.user_first_name, d.user_last_name, d.user_gender, d.user_phone, d.user_address, d.user_license_number,
-            s.school_name, v.vehicle_number
+            u.user_uuid, u.user_username, u.user_email, u.user_status, u.user_last_active, u.created_at,
+			COALESCE(
+				CASE
+					WHEN u.deleted_at IS NULL THEN d.school_uuid
+				END,
+				NULL
+			) AS school_uuid,
+			COALESCE(
+				CASE
+					WHEN v.deleted_at IS NULL THEN d.vehicle_uuid
+				END,
+				NULL
+			) AS vehicle_uuid,
+			d.user_first_name, d.user_last_name, d.user_gender, d.user_phone, d.user_address, d.user_license_number,
+			COALESCE(
+				CASE
+					WHEN s.deleted_at IS NULL THEN s.school_name
+				END,
+				'N/A'
+			) AS school_name,
+			COALESCE(
+				CASE
+					WHEN v.deleted_at IS NULL THEN v.vehicle_number
+				END,
+				'N/A'
+			) AS vehicle_number
         FROM users u
         LEFT JOIN driver_details d ON u.user_uuid = d.user_uuid
         LEFT JOIN schools s ON d.school_uuid = s.school_uuid
         LEFT JOIN vehicles v ON d.vehicle_uuid = v.vehicle_uuid
-        WHERE u.user_role = 'driver' AND u.deleted_at IS NULL AND d.school_uuid = (SELECT school_uuid FROM school_admin_details WHERE user_uuid = $1)
+        WHERE u.user_role = 'driver' AND u.deleted_at IS NULL AND d.school_uuid = $1
         ORDER BY %s %s
         LIMIT $2 OFFSET $3
     `, sortField, sortDirection)
 
-    rows, err := r.DB.Queryx(query, userUUID, limit, offset)
-    if err != nil {
-        return nil, entity.School{}, entity.Vehicle{}, err
-    }
-    defer rows.Close()
+	rows, err := r.DB.Queryx(query, schoolUUID, limit, offset)
+	if err != nil {
+		return nil, entity.School{}, entity.Vehicle{}, err
+	}
+	defer rows.Close()
 
-    for rows.Next() {
-        err := rows.Scan(
-            &user.UUID, &user.Username, &user.Email, &user.Status, &user.LastActive, &user.CreatedAt, &user.CreatedBy,
-            &details.SchoolUUID, &details.VehicleUUID, &details.Picture, &details.FirstName, &details.LastName,
-            &details.Gender, &details.Phone, &details.Address, &details.LicenseNumber,
-            &school.Name, &vehicle.VehicleNumber,
-        )
-        if err != nil {
-            return nil, entity.School{}, entity.Vehicle{}, err
-        }
+	for rows.Next() {
+		err := rows.Scan(
+			&user.UUID, &user.Username, &user.Email, &user.Status, &user.LastActive, &user.CreatedAt,
+			&details.SchoolUUID, &details.VehicleUUID, &details.FirstName, &details.LastName,
+			&details.Gender, &details.Phone, &details.Address, &details.LicenseNumber,
+			&school.Name, &vehicle.VehicleNumber,
+		)
+		if err != nil {
+			return nil, entity.School{}, entity.Vehicle{}, err
+		}
 
-        details.UserUUID = user.UUID
-        user.Details = details
-        users = append(users, user)
-    }
+		detailsJSON, err := json.Marshal(details)
+		if err != nil {
+			return nil, entity.School{}, entity.Vehicle{}, fmt.Errorf("error marshaling driver details: %w", err)
+		}
 
-    return users, school, vehicle, nil
+		user.DetailsJSON = detailsJSON
+		users = append(users, user)
+	}
+
+	return users, school, vehicle, nil
+}
+
+func (r *userRepository) FetchSpecDriverForPermittedSchool(userUUID, schoolUUID string) (entity.User, entity.School, entity.Vehicle, error) {
+	var user entity.User
+	var details entity.DriverDetails
+	var school entity.School
+	var vehicle entity.Vehicle
+
+	query := `
+		SELECT
+			u.user_uuid, u.user_username, u.user_email, u.user_status, u.user_last_active, u.created_at, u.created_by, u.updated_at, u.updated_by,
+			COALESCE(
+				CASE
+					WHEN u.deleted_at IS NULL THEN d.school_uuid
+				END,
+				NULL
+			) AS school_uuid,
+			COALESCE(
+				CASE
+					WHEN v.deleted_at IS NULL THEN d.vehicle_uuid
+				END,
+				NULL
+			) AS vehicle_uuid,
+			d.user_picture, d.user_first_name, d.user_last_name, d.user_gender, d.user_phone, d.user_address, d.user_license_number,
+			COALESCE(
+				CASE
+					WHEN s.deleted_at IS NULL THEN s.school_name
+				END,
+				'N/A'
+			) AS school_name,
+			COALESCE(
+				CASE
+					WHEN v.deleted_at IS NULL THEN v.vehicle_number
+				END,
+				'N/A'
+			) AS vehicle_number
+		FROM users u
+		LEFT JOIN driver_details d ON u.user_uuid = d.user_uuid
+		LEFT JOIN schools s ON d.school_uuid = s.school_uuid
+		LEFT JOIN vehicles v ON d.vehicle_uuid = v.vehicle_uuid
+		WHERE u.user_role = 'driver' AND u.deleted_at IS NULL AND u.user_uuid = $1 AND d.school_uuid = $2
+	`
+
+	err := r.DB.QueryRowx(query, userUUID, schoolUUID).Scan(
+		&user.UUID, &user.Username, &user.Email, &user.Status, &user.LastActive, &user.CreatedAt, &user.CreatedBy, &user.UpdatedAt, &user.UpdatedBy,
+		&details.SchoolUUID, &details.VehicleUUID, &details.Picture, &details.FirstName, &details.LastName,
+		&details.Gender, &details.Phone, &details.Address, &details.LicenseNumber,
+		&school.Name, &vehicle.VehicleNumber,
+	)
+	if err != nil {
+		return user, school, vehicle, err
+	}
+
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		return user, school, vehicle, fmt.Errorf("error marshaling driver details: %w", err)
+	}
+
+	user.DetailsJSON = detailsJSON
+	return user, school, vehicle, nil
+}
+
+func (r *userRepository) CountAllPermittedDriver(schoolUUID string) (int, error) {
+	query := `SELECT COUNT(user_id) FROM users WHERE user_role = 'driver' AND deleted_at IS NULL`
+	if schoolUUID != "" {
+		query += ` AND user_uuid IN (SELECT user_uuid FROM driver_details WHERE school_uuid = $1)`
+	}
+
+	var total int
+	err := r.DB.Get(&total, query, schoolUUID)
+	if err != nil {
+		return 0, err
+	}
+
+	return total, nil
 }
 
 func (r *userRepository) FetchPermittedSchoolAccess(userUUID string) (string, error) {
-    query := `SELECT school_uuid FROM school_admin_details WHERE user_uuid = $1`
-    var schoolUUID string
-    err := r.DB.Get(&schoolUUID, query, userUUID)
-    if err != nil {
-        return "", err
-    }
+	query := `
+		SELECT asd.school_uuid
+		FROM school_admin_details asd
+		LEFT JOIN schools s ON asd.school_uuid = s.school_uuid
+		WHERE asd.user_uuid = $1 AND s.deleted_at IS NULL
+	`
+	var schoolUUID string
+	err := r.DB.Get(&schoolUUID, query, userUUID)
+	if err != nil {
+		return "", err
+	}
 
-    return schoolUUID, nil
+	return schoolUUID, nil
 }
-
-
 
 func (r *userRepository) BeginTransaction() (*sqlx.Tx, error) {
 	tx, err := r.DB.Beginx()
@@ -161,7 +269,7 @@ func (r *userRepository) CheckEmailExist(uuid string, email string) (bool, error
 func (r *userRepository) CheckUsernameExist(uuid string, username string) (bool, error) {
 	var count int
 	query := `SELECT COUNT(user_id) FROM users WHERE user_username = $1 AND deleted_at IS NULL`
-	
+
 	if uuid != "" {
 		query += ` AND user_uuid != $2`
 		if err := r.DB.Get(&count, query, username, uuid); err != nil {
@@ -174,6 +282,16 @@ func (r *userRepository) CheckUsernameExist(uuid string, username string) (bool,
 	}
 
 	return count > 0, nil
+}
+
+func (r *userRepository) FetchUUIDByEmail(email string) (uuid.UUID, error) {
+	var userUUID uuid.UUID
+	query := `SELECT user_uuid FROM users WHERE user_email = $1 AND deleted_at IS NULL`
+	if err := r.DB.Get(&userUUID, query, email); err != nil {
+		return uuid.Nil, err
+	}
+
+	return userUUID, nil
 }
 
 func (r *userRepository) CountSuperAdmin() (int, error) {
@@ -221,8 +339,6 @@ func (r *userRepository) CountAllDriver() (int, error) {
 	return total, nil
 }
 
-
-
 func (r *userRepository) FetchAllSuperAdmins(offset int, limit int, sortField string, sortDirection string) ([]entity.User, error) {
 	var users []entity.User
 	var user entity.User
@@ -257,8 +373,12 @@ func (r *userRepository) FetchAllSuperAdmins(offset int, limit int, sortField st
 			return nil, err
 		}
 
-		details.UserUUID = user.UUID
-		user.Details = details
+		detailsJSON, err := json.Marshal(details)
+		if err != nil {
+			return nil, fmt.Errorf("error marshaling super admin details: %w", err)
+		}
+
+		user.DetailsJSON = detailsJSON
 		users = append(users, user)
 	}
 
@@ -269,14 +389,25 @@ func (r *userRepository) FetchAllSchoolAdmins(offset int, limit int, sortField s
 	var users []entity.User
 	var user entity.User
 	var details entity.SchoolAdminDetails
-    var school entity.School
+	var school entity.School
 
 	query := fmt.Sprintf(`
         SELECT
             u.user_uuid, u.user_username, u.user_email, u.user_status,
             u.user_last_active, u.created_at, u.created_by,
-            d.school_uuid, d.user_picture, d.user_first_name, d.user_last_name, d.user_gender, d.user_phone,
-            s.school_name
+			COALESCE(
+				CASE
+					WHEN s.deleted_at IS NULL THEN d.school_uuid
+				END,
+				NULL
+			) AS school_uuid,
+			d.user_picture, d.user_first_name, d.user_last_name, d.user_gender, d.user_phone,
+            COALESCE(
+				CASE
+					WHEN s.deleted_at IS NULL THEN s.school_name
+				END,
+				'N/A'
+			) AS school_name
         FROM users u
         LEFT JOIN school_admin_details d ON u.user_uuid = d.user_uuid
         LEFT JOIN schools s ON d.school_uuid = s.school_uuid
@@ -299,52 +430,56 @@ func (r *userRepository) FetchAllSchoolAdmins(offset int, limit int, sortField s
 			&details.Gender, &details.Phone, &school.Name,
 		)
 		if err != nil {
-            return nil, entity.School{}, err
-        }
+			return nil, entity.School{}, err
+		}
 
-        details.UserUUID = user.UUID
-        user.Details = details
-        users = append(users, user)
-    }
+		detailsJSON, err := json.Marshal(details)
+		if err != nil {
+			return nil, entity.School{}, fmt.Errorf("error marshaling school admin details: %w", err)
+		}
 
-    return users, school, nil
+		user.DetailsJSON = detailsJSON
+		users = append(users, user)
+	}
+
+	return users, school, nil
 }
 
 func (r *userRepository) FetchAllDrivers(offset int, limit int, sortField string, sortDirection string) ([]entity.User, entity.School, entity.Vehicle, error) {
-    var users []entity.User
-    var user entity.User
-    var details entity.DriverDetails
-    var school entity.School
-    var vehicle entity.Vehicle
+	var users []entity.User
+	var user entity.User
+	var details entity.DriverDetails
+	var school entity.School
+	var vehicle entity.Vehicle
 
-    query := fmt.Sprintf(`
+	query := fmt.Sprintf(`
         SELECT
             u.user_uuid, u.user_username, u.user_email, u.user_status, u.user_last_active, u.created_at, u.created_by,
             d.school_uuid, d.vehicle_uuid, d.user_picture, d.user_first_name, d.user_last_name, d.user_gender, d.user_phone, d.user_address, d.user_license_number,
-			COALESCE(
-				CASE
-					WHEN s.deleted_at IS NULL THEN s.school_name
-				END,
-				'N/A'
-			) AS school_name,
-			COALESCE(
-				CASE
-					WHEN v.deleted_at IS NULL THEN v.driver_uuid
-				END,
-				NULL
-			) AS driver_uuid,
-			COALESCE(
-				CASE
-					WHEN v.deleted_at IS NULL THEN v.vehicle_number
-				END,
-				'N/A'
-			) AS vehicle_number,
-			COALESCE(
-				CASE
-					WHEN v.deleted_at IS NULL THEN v.vehicle_name
-				END,
-				'N/A'
-			) AS vehicle_name
+            COALESCE(
+                CASE
+                    WHEN s.deleted_at IS NULL THEN s.school_name
+                END,
+                'N/A'
+            ) AS school_name,
+            COALESCE(
+                CASE
+                    WHEN v.deleted_at IS NULL THEN v.driver_uuid
+                END,
+                NULL
+            ) AS driver_uuid,
+            COALESCE(
+                CASE
+                    WHEN v.deleted_at IS NULL THEN v.vehicle_number
+                END,
+                'N/A'
+            ) AS vehicle_number,
+            COALESCE(
+                CASE
+                    WHEN v.deleted_at IS NULL THEN v.vehicle_name
+                END,
+                'N/A'
+            ) AS vehicle_name
         FROM users u
         LEFT JOIN driver_details d ON u.user_uuid = d.user_uuid
         LEFT JOIN schools s ON d.school_uuid = s.school_uuid
@@ -354,29 +489,33 @@ func (r *userRepository) FetchAllDrivers(offset int, limit int, sortField string
         LIMIT $1 OFFSET $2
     `, sortField, sortDirection)
 
-    rows, err := r.DB.Queryx(query, limit, offset)
-    if err != nil {
-        return nil, entity.School{}, entity.Vehicle{}, err
-    }
-    defer rows.Close()
+	rows, err := r.DB.Queryx(query, limit, offset)
+	if err != nil {
+		return nil, entity.School{}, entity.Vehicle{}, err
+	}
+	defer rows.Close()
 
-    for rows.Next() {
-        err := rows.Scan(
-            &user.UUID, &user.Username, &user.Email, &user.Status, &user.LastActive, &user.CreatedAt, &user.CreatedBy,
-            &details.SchoolUUID, &details.VehicleUUID, &details.Picture, &details.FirstName, &details.LastName,
-            &details.Gender, &details.Phone, &details.Address, &details.LicenseNumber,
-            &school.Name, &vehicle.UUID, &vehicle.VehicleNumber, &vehicle.VehicleName,
-        )
-        if err != nil {
-            return nil, entity.School{}, entity.Vehicle{}, err
-        }
+	for rows.Next() {
+		err := rows.Scan(
+			&user.UUID, &user.Username, &user.Email, &user.Status, &user.LastActive, &user.CreatedAt, &user.CreatedBy,
+			&details.SchoolUUID, &details.VehicleUUID, &details.Picture, &details.FirstName, &details.LastName,
+			&details.Gender, &details.Phone, &details.Address, &details.LicenseNumber,
+			&school.Name, &vehicle.UUID, &vehicle.VehicleNumber, &vehicle.VehicleName,
+		)
+		if err != nil {
+			return nil, entity.School{}, entity.Vehicle{}, err
+		}
 
-        details.UserUUID = user.UUID
-        user.Details = details
-        users = append(users, user)
-    }
+		detailsJSON, err := json.Marshal(details)
+		if err != nil {
+			return nil, entity.School{}, entity.Vehicle{}, fmt.Errorf("error marshaling driver details: %w", err)
+		}
 
-    return users, school, vehicle, nil
+		user.DetailsJSON = detailsJSON
+		users = append(users, user)
+	}
+
+	return users, school, vehicle, nil
 }
 
 func (r *userRepository) FetchSpecDriverFromAllSchools(userUUID string) (entity.User, entity.School, entity.Vehicle, error) {
@@ -432,17 +571,19 @@ func (r *userRepository) FetchSpecDriverFromAllSchools(userUUID string) (entity.
 		&details.Gender, &details.Phone, &details.Address, &details.LicenseNumber,
 		&school.UUID, &school.Name, &vehicle.UUID, &vehicle.VehicleNumber, &vehicle.VehicleName,
 	)
-	
+
 	if err != nil {
 		return user, school, vehicle, err
 	}
 
-	details.UserUUID = user.UUID
-	user.Details = details
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		return user, school, vehicle, fmt.Errorf("error marshaling driver details: %w", err)
+	}
+
+	user.DetailsJSON = detailsJSON
 	return user, school, vehicle, nil
 }
-
-
 
 func (r *userRepository) FetchSpecSuperAdmin(userUUID string) (entity.User, error) {
 	var user entity.User
@@ -470,22 +611,37 @@ func (r *userRepository) FetchSpecSuperAdmin(userUUID string) (entity.User, erro
 		return user, err
 	}
 
-	details.UserUUID = user.UUID
-	user.Details = details
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		return user, fmt.Errorf("error marshaling super admin details: %w", err)
+	}
+
+	user.DetailsJSON = detailsJSON
 	return user, nil
 }
 
 func (r *userRepository) FetchSpecSchoolAdmin(userUUID string) (entity.User, entity.School, error) {
 	var user entity.User
 	var details entity.SchoolAdminDetails
-    var school entity.School
+	var school entity.School
 
 	query := `
         SELECT
             u.user_uuid, u.user_username, u.user_email, u.user_status,
             u.user_last_active, u.created_at, u.created_by, u.updated_at, u.updated_by, u.deleted_at, u.deleted_by,
-            d.school_uuid, d.user_picture, d.user_first_name, d.user_last_name, d.user_gender, d.user_phone, d.user_address,
-            s.school_name
+            COALESCE(
+				CASE
+					WHEN s.deleted_at IS NULL THEN d.school_uuid
+				END,
+				NULL
+			) AS school_uuid,
+			d.user_picture, d.user_first_name, d.user_last_name, d.user_gender, d.user_phone, d.user_address,
+            COALESCE(
+				CASE
+					WHEN s.deleted_at IS NULL THEN s.school_name
+				END,
+				'N/A'
+			) AS school_name
         FROM users u
         LEFT JOIN school_admin_details d ON u.user_uuid = d.user_uuid
         LEFT JOIN schools s ON d.school_uuid = s.school_uuid
@@ -499,16 +655,18 @@ func (r *userRepository) FetchSpecSchoolAdmin(userUUID string) (entity.User, ent
 		&details.Gender, &details.Phone, &details.Address, &school.Name,
 	)
 
-    if err != nil {
-        return user, school, err
-    }
+	if err != nil {
+		return user, school, err
+	}
 
-    details.UserUUID = user.UUID
-    user.Details = details
-    return user, school, nil
+	detailsJSON, err := json.Marshal(details)
+	if err != nil {
+		return user, school, fmt.Errorf("error marshaling school admin details: %w", err)
+	}
+
+	user.DetailsJSON = detailsJSON
+	return user, school, nil
 }
-
-
 
 func (r *userRepository) FetchSuperAdminDetails(userUUID uuid.UUID) (entity.SuperAdminDetails, error) {
 	var superAdminDetails entity.SuperAdminDetails
@@ -553,8 +711,6 @@ func (r *userRepository) FetchDriverDetails(userUUID uuid.UUID) (entity.DriverDe
 
 	return driverDetails, nil
 }
-
-
 
 func (r *userRepository) SaveUser(tx *sqlx.Tx, userEntity entity.User) (uuid.UUID, error) {
 	query := `
@@ -636,19 +792,19 @@ func (r *userRepository) SaveDriverDetails(tx *sqlx.Tx, details entity.DriverDet
 
 func (r *userRepository) UpdateDriverUUIDInVehicles(tx *sqlx.Tx, userUUID uuid.UUID, vehicleUUID uuid.UUID) error {
 	var userUUIDParam interface{}
-    if userUUID == uuid.Nil {
-        userUUIDParam = nil
-    } else {
-        userUUIDParam = userUUID
-    }
+	if userUUID == uuid.Nil {
+		userUUIDParam = nil
+	} else {
+		userUUIDParam = userUUID
+	}
 
-    query := `
+	query := `
         UPDATE vehicles
         SET driver_uuid = $1
         WHERE vehicle_uuid = $2
 		`
-    _, err := tx.Exec(query, userUUIDParam, vehicleUUID)
-    return err
+	_, err := tx.Exec(query, userUUIDParam, vehicleUUID)
+	return err
 }
 
 func (r *userRepository) UpdateUser(tx *sqlx.Tx, user entity.User, userUUID string) error {
@@ -707,9 +863,9 @@ func (r *userRepository) UpdateSchoolAdminDetails(tx *sqlx.Tx, details entity.Sc
 func (r *userRepository) UpdateParentDetails(tx *sqlx.Tx, details entity.ParentDetails, userUUID string) error {
 	query := `
         UPDATE parent_details
-        SET user_picture = :user_picture, user_first_name = :user_first_name, user_last_name = :user_last_name, user_gender = :user_gender, user_phone = :user_phone, user_address = :user_address
-        WHERE user_uuid = :user_uuid`
-	res, err := tx.NamedExec(query, details)
+        SET user_first_name = $1, user_last_name = $2, user_gender = $3, user_phone = $4, user_address = $5
+		WHERE user_uuid = $6`
+	res, err := tx.Exec(query, details.FirstName, details.LastName, details.Gender, details.Phone, details.Address, userUUID)
 	if err != nil {
 		return err
 	}
@@ -729,21 +885,21 @@ func (r *userRepository) UpdateParentDetails(tx *sqlx.Tx, details entity.ParentD
 func (r *userRepository) UpdateDriverDetails(tx *sqlx.Tx, details entity.DriverDetails, userUUID uuid.UUID) error {
 	details.UserUUID = userUUID
 
-    if details.SchoolUUID == nil || *details.SchoolUUID == uuid.Nil {
-        details.SchoolUUID = nil
-    }
-    if details.VehicleUUID == nil || *details.VehicleUUID == uuid.Nil {
-        details.VehicleUUID = nil
-    }
+	if details.SchoolUUID == nil || *details.SchoolUUID == uuid.Nil {
+		details.SchoolUUID = nil
+	}
+	if details.VehicleUUID == nil || *details.VehicleUUID == uuid.Nil {
+		details.VehicleUUID = nil
+	}
 
-    var currentVehicleUUID *uuid.UUID
-    if details.VehicleUUID == nil {
-        err := tx.Get(&currentVehicleUUID, `SELECT vehicle_uuid FROM driver_details WHERE user_uuid = $1`, userUUID)
-        if err != nil && err != sql.ErrNoRows {
-            return err
-        }
-    }
-		
+	var currentVehicleUUID *uuid.UUID
+	if details.VehicleUUID == nil {
+		err := tx.Get(&currentVehicleUUID, `SELECT vehicle_uuid FROM driver_details WHERE user_uuid = $1`, userUUID)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+	}
+
 	query := `
         UPDATE driver_details
         SET school_uuid = $1, vehicle_uuid = $2, user_first_name = $3, user_last_name = $4,
@@ -753,28 +909,26 @@ func (r *userRepository) UpdateDriverDetails(tx *sqlx.Tx, details entity.DriverD
 	if err != nil {
 		return err
 	}
-	
+
 	rowsAffected, err := res.RowsAffected()
 	if err != nil {
 		return err
 	}
-	
+
 	if rowsAffected == 0 {
 		return fmt.Errorf("no rows affected")
 	}
-	
-	if details.VehicleUUID != nil {
-        return r.UpdateDriverUUIDInVehicles(tx, userUUID, *details.VehicleUUID)
-    }
 
-    if currentVehicleUUID != nil {
-        return r.UpdateDriverUUIDInVehicles(tx, uuid.Nil, *currentVehicleUUID)
-    }
-	
+	if details.VehicleUUID != nil {
+		return r.UpdateDriverUUIDInVehicles(tx, userUUID, *details.VehicleUUID)
+	}
+
+	if currentVehicleUUID != nil {
+		return r.UpdateDriverUUIDInVehicles(tx, uuid.Nil, *currentVehicleUUID)
+	}
+
 	return nil
 }
-
-
 
 func (r *userRepository) DeleteSuperAdmin(tx *sqlx.Tx, userUUID uuid.UUID, user_name string) error {
 	query := `UPDATE users SET deleted_at = NOW(), deleted_by = $1 WHERE user_uuid = $2`

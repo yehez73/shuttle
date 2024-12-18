@@ -61,7 +61,7 @@ func main() {
 	user := User{
 		ID:       0,
 		UUID:     "00000000-0000-0000-0000-000000000000",
-		Username: "faker",
+		Username: "",
 		Email:    "faker@gmail.com",
 		Password: hashedPassword,
 		Role:     SuperAdmin,
@@ -78,7 +78,6 @@ func main() {
 		Address:   "",
 	}
 
-	// Use the correct struct tags in the query
 	_, err = db.Exec(`
 		INSERT INTO users (user_id, user_uuid, user_username, user_email, user_password, user_role, user_role_code)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -98,7 +97,7 @@ func main() {
 	}
 
 	color.Green("Users seeded successfully!")
-	color.Yellow("Please login and create a new user with superadmin role immediately and delete this user.")
+	color.Yellow("Please login and create a new user with superadmin role immediately and do hard delete this user.")
 }
 
 func hashPassword(password string) (string, error) {

@@ -8,14 +8,20 @@ import (
 	"shuttle/errors"
 	"shuttle/logger"
 	"shuttle/models/dto"
+	"shuttle/models/entity"
 	"shuttle/services"
 	"shuttle/utils"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 type UserHandlerInterface interface {
+	AddSchoolDriver(c *fiber.Ctx) error
+	UpdateSchoolDriver(c *fiber.Ctx) error
+	DeleteSchoolDriver(c *fiber.Ctx) error
+
 	GetAllSuperAdmin(c *fiber.Ctx) error
 	GetAllSchoolAdmin(c *fiber.Ctx) error
 	GetAllPermittedDriver(c *fiber.Ctx) error
@@ -35,12 +41,14 @@ type UserHandlerInterface interface {
 type userHandler struct {
 	userService   services.UserService
 	schoolService services.SchoolService
+	vehicleService services.VehicleService
 }
 
-func NewUserHttpHandler(userService services.UserService, schoolService services.SchoolService) UserHandlerInterface {
+func NewUserHttpHandler(userService services.UserService, schoolService services.SchoolService, vehicleService services.VehicleService) UserHandlerInterface {
 	return &userHandler{
 		userService:   userService,
 		schoolService: schoolService,
+		vehicleService: vehicleService,
 	}
 }
 
@@ -274,7 +282,10 @@ func (handler *userHandler) GetAllPermittedDriver(c *fiber.Ctx) error {
 			start = 0
 		}
 
-		end := limit
+		end := start + len(users) - 1
+		if end > totalItems {
+			end = totalItems
+		}
 
 		if len(users) == 0 {
 			start = 0
@@ -305,16 +316,22 @@ func (handler *userHandler) GetSpecPermittedDriver(c *fiber.Ctx) error {
 	var user dto.UserResponseDTO
 	var err error
 
+	_, err = handler.userService.GetSpecUserWithDetails(id)
+	if err != nil {
+		logger.LogError(err, "Failed to fetch user", nil)
+		return utils.NotFoundResponse(c, "User not found", nil)
+	}
+
 	switch role {
 	case "SA":
 		user, err = handler.userService.GetSpecDriverFromAllSchools(id)
-	// case "AS":
-	// 	schoolUUID, ok := c.Locals("schoolUUID").(string)
-	// 	if !ok {
-	// 		return utils.BadRequestResponse(c, "Token is invalid", nil)
-	// 	}
+	case "AS":
+		schoolUUID, ok := c.Locals("schoolUUID").(string)
+		if !ok {
+			return utils.BadRequestResponse(c, "Token is invalid", nil)
+		}
 
-	// 	user, err = handler.userService.GetSpecDriverForPermittedSchool(id, schoolUUID)
+		user, err = handler.userService.GetSpecDriverForPermittedSchool(id, schoolUUID)
 	default:
 		return utils.BadRequestResponse(c, "Invalid role", nil)
 	}
@@ -325,35 +342,6 @@ func (handler *userHandler) GetSpecPermittedDriver(c *fiber.Ctx) error {
 	}
 
 	return utils.SuccessResponse(c, "User fetched successfully", user)
-}
-
-func (handler *userHandler) DeleteDriver(c *fiber.Ctx) error {
-	id := c.Params("id")
-	username := c.Locals("user_name").(string)
-
-	forceDelete := c.Query("force_delete")
-
-	existingUser, checkErr := handler.userService.GetSpecUserWithDetails(id)
-	if checkErr != nil {
-		return utils.NotFoundResponse(c, "User not found", nil)
-	}
-
-	detailsMap, mapErr := convertToMap(existingUser.Details)
-	if mapErr != nil {
-		logger.LogError(mapErr, "Failed to convert details to map", nil)
-		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
-	}
-
-	if (detailsMap["SchoolUUID"] != "N/A" && detailsMap["SchoolUUID"] != "") && forceDelete != "true" {
-		return utils.BadRequestResponse(c, "Warning: This driver is still associated with a school, continue?", nil)
-	}
-
-	err := handler.userService.DeleteDriver(id, username)
-	if err != nil {
-		return utils.InternalServerErrorResponse(c, "Failed to delete driver", nil)
-	}
-
-	return utils.SuccessResponse(c, "Driver deleted successfully", nil)
 }
 
 func (handler *userHandler) GetSpecSuperAdmin(c *fiber.Ctx) error {
@@ -377,63 +365,6 @@ func (handler *userHandler) GetSpecSchoolAdmin(c *fiber.Ctx) error {
 
 	return utils.SuccessResponse(c, "User fetched successfully", user)
 }
-
-// func GetAllPermittedDriver(c *fiber.Ctx) error {
-// 	role := c.Locals("role_code").(string)
-
-//     var users []models.UserResponse
-//     var err error
-
-//     if role == "SA" {
-//         users, err = services.GetAllDriverFromAllSchools()
-//     } else if role == "AS" {
-// 		schoolObjID, parseErr := primitive.ObjectIDFromHex(c.Locals("schoolId").(string))
-// 		if parseErr != nil {
-// 			logger.LogError(parseErr, "Failed to convert school id", map[string]interface{}{
-// 				"school_id": c.Locals("schoolId"),
-// 			})
-// 			return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
-// 		}
-
-//         users, err = services.GetAllDriverForPermittedSchool(schoolObjID)
-//     }
-
-//     if err != nil {
-// 		logger.LogError(err, "Failed to fetch all drivers", nil)
-//         return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
-//     }
-
-//     return c.Status(fiber.StatusOK).JSON(users)
-// }
-
-// func GetSpecPermittedDriver(c *fiber.Ctx) error {
-// 	id := c.Params("id")
-// 	role := c.Locals("role_code").(string)
-
-// 	var user models.UserResponse
-// 	var err error
-
-// 	if role == "SA" {
-// 		user, err = services.GetSpecDriverFromAllSchools(id)
-// 	} else if role == "AS" {
-// 		schoolObjID, parseErr := primitive.ObjectIDFromHex(c.Locals("schoolId").(string))
-// 		if parseErr != nil {
-// 			logger.LogError(parseErr, "Failed to convert school id", map[string]interface{}{
-// 				"school_id": c.Locals("schoolId"),
-// 			})
-// 			return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
-// 		}
-
-// 		user, err = services.GetSpecDriverForPermittedSchool(id, schoolObjID)
-// 	}
-
-// 	if err != nil {
-// 		logger.LogError(err, "Failed to fetch specific driver", nil)
-// 		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
-// 	}
-
-// 	return c.Status(fiber.StatusOK).JSON(user)
-// }
 
 func (handler *userHandler) AddUser(c *fiber.Ctx) error {
 	username := c.Locals("user_name").(string)
@@ -462,9 +393,72 @@ func (handler *userHandler) AddUser(c *fiber.Ctx) error {
 	return utils.SuccessResponse(c, "User created successfully", nil)
 }
 
+func (handler *userHandler) AddSchoolDriver(c *fiber.Ctx) error {
+	username, ok := c.Locals("user_name").(string)
+	if !ok {
+		logger.LogError(nil, "Token does not contain username", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	schoolUUID, ok := c.Locals("schoolUUID").(string)
+	if !ok {
+		logger.LogError(nil, "Token does not contain school uuid", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	userReqDTO := new(dto.UserRequestsDTO)
+	if err := c.BodyParser(userReqDTO); err != nil {
+		return utils.BadRequestResponse(c, "Invalid request data", nil)
+	}
+
+	userReqDTO.Role= dto.Role(entity.Driver)
+
+	// Parse existing details if present
+	var existingDetails dto.DriverDetailsRequestsDTO
+	if len(userReqDTO.Details) > 0 {
+		if err := json.Unmarshal(userReqDTO.Details, &existingDetails); err != nil {
+			logger.LogError(err, "Failed to unmarshal existing details", nil)
+			return utils.BadRequestResponse(c, "Invalid details format", nil)
+		}
+	}
+
+	// Add or overwrite the school UUID
+	existingDetails.SchoolUUID = schoolUUID
+
+	// Marshal back to JSON
+	driverDetailsBytes, err := json.Marshal(existingDetails)
+	if err != nil {
+		logger.LogError(err, "Failed to marshal updated details", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	userReqDTO.Details = driverDetailsBytes
+
+	if err := utils.ValidateStruct(c, userReqDTO); err != nil {
+		return utils.BadRequestResponse(c, strings.ToUpper(err.Error()[0:1])+err.Error()[1:], nil)
+	}
+
+	if err := validateUserRoleDetails(c, userReqDTO, *handler); err != nil {
+		return utils.BadRequestResponse(c, strings.ToUpper(err.Error()[0:1])+err.Error()[1:], nil)
+	}
+
+	if _, err := handler.userService.AddUser(*userReqDTO, username); err != nil {
+		if customErr, ok := err.(*errors.CustomError); ok {
+			return utils.ErrorResponse(c, customErr.StatusCode, strings.ToUpper(string(customErr.Message[0]))+customErr.Message[1:], nil)
+		}
+		logger.LogError(err, "Failed to create user", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	return utils.SuccessResponse(c, "User created successfully", nil)
+}
+
 func (handler *userHandler) UpdateUser(c *fiber.Ctx) error {
 	id := c.Params("id")
-	username := c.Locals("user_name").(string)
+	username, ok := c.Locals("user_name").(string)
+	if !ok || username == "" {
+		return utils.BadRequestResponse(c, "Invalid or missing username in context", nil)
+	}
 
 	userReqDTO := new(dto.UserRequestsDTO)
 	if err := c.BodyParser(userReqDTO); err != nil {
@@ -477,7 +471,9 @@ func (handler *userHandler) UpdateUser(c *fiber.Ctx) error {
 		return utils.NotFoundResponse(c, "User not found", nil)
 	}
 
-	userReqDTO.Password = existingUser.Password
+	if userReqDTO.Password == "" {
+		userReqDTO.Password = existingUser.User.Password
+	}
 
 	if err := utils.ValidateStruct(c, userReqDTO); err != nil {
 		return utils.BadRequestResponse(c, strings.ToUpper(err.Error()[0:1])+err.Error()[1:], nil)
@@ -487,13 +483,75 @@ func (handler *userHandler) UpdateUser(c *fiber.Ctx) error {
 		return utils.BadRequestResponse(c, strings.ToUpper(err.Error()[0:1])+err.Error()[1:], nil)
 	}
 
-	detailsMap, err := convertToMap(existingUser.Details)
-	if err != nil {
-		logger.LogError(err, "Failed to convert details to map", nil)
+	if err := handler.userService.UpdateUser(id, *userReqDTO, username, nil); err != nil {
+		if customErr, ok := err.(*errors.CustomError); ok {
+			return utils.ErrorResponse(c, customErr.StatusCode, strings.ToUpper(string(customErr.Message[0]))+customErr.Message[1:], nil)
+		}
+		logger.LogError(err, "Failed to update user", nil)
 		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
 	}
 
-	if err := handler.userService.UpdateUser(id, *userReqDTO, username, detailsMap, nil); err != nil {
+	return utils.SuccessResponse(c, "User updated successfully", nil)
+}
+
+func (handler *userHandler) UpdateSchoolDriver(c *fiber.Ctx) error {
+	id := c.Params("id")
+	username, ok := c.Locals("user_name").(string)
+	if !ok || username == "" {
+		logger.LogError(nil, "Token does not contain username", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	schoolUUID, ok := c.Locals("schoolUUID").(string)
+	if !ok {
+		logger.LogError(nil, "Token does not contain school uuid", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	userReqDTO := new(dto.UserRequestsDTO)
+	if err := c.BodyParser(userReqDTO); err != nil {
+		return utils.BadRequestResponse(c, "Invalid request data", nil)
+	}
+
+	existingUser, err := handler.userService.GetSpecUserWithDetails(id)
+	if err != nil {
+		logger.LogError(err, "Failed to fetch user", nil)
+		return utils.NotFoundResponse(c, "User not found", nil)
+	}
+
+	if userReqDTO.Password == "" {
+		userReqDTO.Password = existingUser.User.Password
+	}
+	
+	userReqDTO.Role= dto.Role(entity.Driver)
+
+	var existingDetails dto.DriverDetailsRequestsDTO
+	if len(userReqDTO.Details) > 0 {
+		if err := json.Unmarshal(userReqDTO.Details, &existingDetails); err != nil {
+			logger.LogError(err, "Failed to unmarshal existing details", nil)
+			return utils.BadRequestResponse(c, "Invalid details format", nil)
+		}
+	}
+
+	existingDetails.SchoolUUID = schoolUUID
+
+	driverDetailsBytes, err := json.Marshal(existingDetails)
+	if err != nil {
+		logger.LogError(err, "Failed to marshal updated details", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	userReqDTO.Details = driverDetailsBytes
+
+	if err := utils.ValidateStruct(c, userReqDTO); err != nil {
+		return utils.BadRequestResponse(c, strings.ToUpper(err.Error()[0:1])+err.Error()[1:], nil)
+	}
+
+	if err := validateUserRoleDetails(c, userReqDTO, *handler); err != nil {
+		return utils.BadRequestResponse(c, strings.ToUpper(err.Error()[0:1])+err.Error()[1:], nil)
+	}
+
+	if err := handler.userService.UpdateUser(id, *userReqDTO, username, nil); err != nil {
 		if customErr, ok := err.(*errors.CustomError); ok {
 			return utils.ErrorResponse(c, customErr.StatusCode, strings.ToUpper(string(customErr.Message[0]))+customErr.Message[1:], nil)
 		}
@@ -520,6 +578,64 @@ func (handler *userHandler) DeleteSuperAdmin(c *fiber.Ctx) error {
 }
 
 func (handler *userHandler) DeleteSchoolAdmin(c *fiber.Ctx) error {
+    id := c.Params("id")
+    username := c.Locals("user_name").(string)
+
+    forceDelete := c.Query("force_delete")
+
+    existingUser, checkErr := handler.userService.GetSpecUserWithDetails(id)
+    if checkErr != nil {
+        return utils.NotFoundResponse(c, "User not found", nil)
+    }
+
+    // Periksa apakah school admin masih terasosiasi dengan sekolah
+	if existingUser.SchoolAdminDetails.SchoolUUID != uuid.Nil && forceDelete != "true" {
+        return utils.BadRequestResponse(c, "Warning: This school admin is still associated with a school, continue?", nil)
+    }
+
+    // Hapus school admin
+    err := handler.userService.DeleteSchoolAdmin(id, username)
+    if err != nil {
+        return utils.InternalServerErrorResponse(c, "Failed to delete school admin", nil)
+    }
+
+    return utils.SuccessResponse(c, "School admin deleted successfully", nil)
+}
+
+func (handler *userHandler) DeleteDriver(c *fiber.Ctx) error {
+    id := c.Params("id")
+    username, ok := c.Locals("user_name").(string)
+	if !ok || username == "" {
+		logger.LogError(nil, "Token does not contain username", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	_, ok = c.Locals("schoolUUID").(string)
+	if !ok {
+		logger.LogError(nil, "Token does not contain school uuid", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+    forceDelete := c.Query("force_delete")
+
+    existingUser, checkErr := handler.userService.GetSpecUserWithDetails(id)
+    if checkErr != nil {
+        return utils.NotFoundResponse(c, "User not found", nil)
+    }
+
+    if existingUser.DriverDetails.SchoolUUID != nil && *existingUser.DriverDetails.SchoolUUID != uuid.Nil && forceDelete != "true" {
+        return utils.BadRequestResponse(c, "Warning: This driver is still associated with a school, continue?", nil)
+    }
+
+    err := handler.userService.DeleteDriver(id, username)
+    if err != nil {
+        return utils.InternalServerErrorResponse(c, "Failed to delete driver", nil)
+    }
+
+    return utils.SuccessResponse(c, "Driver deleted successfully", nil)
+}
+
+func (handler *userHandler) DeleteSchoolDriver(c *fiber.Ctx) error {
 	id := c.Params("id")
 	username := c.Locals("user_name").(string)
 
@@ -527,25 +643,21 @@ func (handler *userHandler) DeleteSchoolAdmin(c *fiber.Ctx) error {
 
 	existingUser, checkErr := handler.userService.GetSpecUserWithDetails(id)
 	if checkErr != nil {
+		logger.LogError(checkErr, "Failed to get user", nil)
 		return utils.NotFoundResponse(c, "User not found", nil)
 	}
 
-	detailsMap, mapErr := convertToMap(existingUser.Details)
-	if mapErr != nil {
-		logger.LogError(mapErr, "Failed to convert details to map", nil)
-		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	if existingUser.DriverDetails.VehicleUUID != nil && *existingUser.DriverDetails.VehicleUUID != uuid.Nil && forceDelete != "true" {
+        return utils.BadRequestResponse(c, "Warning: This driver is may still operating a vehicle, continue?", nil)
 	}
 
-	if (detailsMap["SchoolUUID"] != "N/A" && detailsMap["SchoolUUID"] != "") && forceDelete != "true" {
-		return utils.BadRequestResponse(c, "Warning: This school admin is still associated with a school, continue?", nil)
-	}
-
-	err := handler.userService.DeleteSchoolAdmin(id, username)
+	err := handler.userService.DeleteDriver(id, username)
 	if err != nil {
-		return utils.InternalServerErrorResponse(c, "Failed to delete school admin", nil)
+		logger.LogError(err, "Failed to delete driver", nil)
+		return utils.InternalServerErrorResponse(c, "Failed to delete driver", nil)
 	}
 
-	return utils.SuccessResponse(c, "School admin deleted successfully", nil)
+	return utils.SuccessResponse(c, "Driver deleted successfully", nil)
 }
 
 // func validateCommonUserFields(c *fiber.Ctx, user *dto.UserRequestsDTO, handler userHandler) error {
@@ -584,7 +696,7 @@ func (handler *userHandler) DeleteSchoolAdmin(c *fiber.Ctx) error {
 // 	return nil
 // }
 
-func validateUserRoleDetails(c *fiber.Ctx, user *dto.UserRequestsDTO, handler userHandler) error {
+func validateUserRoleDetails(_ *fiber.Ctx, user *dto.UserRequestsDTO, handler userHandler) error {
 	switch user.Role {
 	case dto.SuperAdmin:
 		user.RoleCode = "SA"
@@ -593,7 +705,7 @@ func validateUserRoleDetails(c *fiber.Ctx, user *dto.UserRequestsDTO, handler us
 		details, err := parseDetails[dto.SchoolAdminDetailsRequestsDTO](user.Details)
 		if err != nil {
 			logger.LogError(err, "Invalid details format for SchoolAdmin", map[string]interface{}{
-				"details": user.Details,
+				"details": string(user.Details),
 			})
 			return errors.New("invalid details format for SchoolAdmin", 400)
 		}
@@ -608,7 +720,6 @@ func validateUserRoleDetails(c *fiber.Ctx, user *dto.UserRequestsDTO, handler us
 		}
 
 		user.RoleCode = "AS"
-		user.Details = details
 
 	case dto.Parent:
 		if user.Details == nil {
@@ -620,48 +731,44 @@ func validateUserRoleDetails(c *fiber.Ctx, user *dto.UserRequestsDTO, handler us
 		details, err := parseDetails[dto.DriverDetailsRequestsDTO](user.Details)
 		if err != nil {
 			logger.LogError(err, "Invalid details format for Driver", map[string]interface{}{
-				"details": user.Details,
+				"details": string(user.Details),
 			})
 			return errors.New("invalid details format for Driver", 400)
 		}
 
-		// if details.VehicleID != 0 {
-		//     _, err := GetSpecVehicle(details.VehicleID)
-		//     if err != nil {
-		//         return errors.New("vehicle not found")
-		//     }
+		if details.VehicleUUID != "" {
+			_, errVehicle := handler.vehicleService.GetSpecVehicle(details.VehicleUUID)
+			if errVehicle != nil {
+				return errors.New("vehicle is not found", 404)
+			}
+		}
+		// else if details.VehicleUUID != "" && details.SchoolUUID != "" {
+		// 	_, errVehicle := handler.vehicleService.GetSpecVehicleInSchool(details.VehicleUUID, details.SchoolUUID)
+		// 	if errVehicle != nil {
+		// 		return errors.New("vehicle is not found", 404)
+		// 	}
 		// }
 
-		// if details.SchoolID != 0 {
-		//     _, err := GetSpecSchool(details.SchoolID)
-		//     if err != nil {
-		//         return errors.New("school not found")
-		//     }
-		// }
+		if details.SchoolUUID != "" {
+			_, errSchool := handler.schoolService.GetSpecSchool(details.SchoolUUID)
+			if errSchool != nil {
+				return errors.New("school is not found", 404)
+			}
+		}
 
 		user.RoleCode = "D"
-		user.Details = details
 
 	default:
 		return errors.New("invalid role specified", 400)
 	}
+
 	return nil
 }
 
-func parseDetails[T any](details interface{}) (T, error) {
+func parseDetails[T any](details json.RawMessage) (T, error) {
 	var parsedDetails T
 
-	detailsMap, ok := details.(map[string]interface{})
-	if !ok {
-		return parsedDetails, fmt.Errorf("invalid details format: expected map[string]interface{}, got %T", details)
-	}
-
-	detailsBytes, err := json.Marshal(detailsMap)
-	if err != nil {
-		return parsedDetails, fmt.Errorf("failed to marshal details to JSON: %w", err)
-	}
-
-	err = json.Unmarshal(detailsBytes, &parsedDetails)
+	err := json.Unmarshal(details, &parsedDetails)
 	if err != nil {
 		return parsedDetails, fmt.Errorf("failed to unmarshal details to struct: %w", err)
 	}
@@ -678,24 +785,4 @@ func isValidSortFieldForUsers(field string) bool {
 		"created_at":      true,
 	}
 	return allowedFields[field]
-}
-
-func safeString(value interface{}) string {
-	if str, ok := value.(string); ok {
-		return str
-	}
-	return ""
-}
-
-func convertToMap(data interface{}) (map[string]interface{}, error) {
-	bytes, err := json.Marshal(data)
-	if err != nil {
-		return nil, err
-	}
-	var result map[string]interface{}
-	err = json.Unmarshal(bytes, &result)
-	if err != nil {
-		return nil, err
-	}
-	return result, nil
 }

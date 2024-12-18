@@ -17,20 +17,27 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	userRepository := repositories.NewUserRepository(db)
 	schoolRepository := repositories.NewSchoolRepository(db)
 	vehicleRepository := repositories.NewVehicleRepository(db)
+	studentRepository := repositories.NewStudentRepository(db)
+	routeRepository := repositories.NewRouteRepository(db)
 	
 	userService := services.NewUserService(userRepository)
 	authService := services.NewAuthService(authRepository, userRepository)
 	schoolService := services.NewSchoolService(schoolRepository, userRepository)
 	vehicleService := services.NewVehicleService(vehicleRepository)
+	studentService := services.NewStudentService(studentRepository, &userService, userRepository)
+	routeService := services.NewRouteService(routeRepository)
 	
 	authHandler := handler.NewAuthHttpHandler(authService)
-	userHandler := handler.NewUserHttpHandler(userService, schoolService)
+	userHandler := handler.NewUserHttpHandler(userService, schoolService, vehicleService)
 	schoolHandler := handler.NewSchoolHttpHandler(schoolService)
 	vehicleHandler := handler.NewVehicleHttpHandler(vehicleService)
+	studentHandler := handler.NewStudentHttpHandler(studentService)
+	routeHandler := handler.NewRouteHttpHandler(routeService)
 
 	wsService := utils.NewWebSocketService(userRepository, authRepository)
 	
-	// FOR PUBLIC
+	////////////////////////////////////// PUBLIC //////////////////////////////////////
+
 	r.Post("login", authHandler.Login)
 	r.Post("/refresh-token", authHandler.IssueNewAccessToken)
 	r.Static("/assets", "./assets")
@@ -43,7 +50,8 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	})
 	r.Get("/ws/:id", websocket.New(wsService.HandleWebSocketConnection))
 
-	// FOR AUTHENTICATED
+	////////////////////////////////////// AUTHENTICATED //////////////////////////////////////
+
 	protected := r.Group("/api")
 	protected.Use(middleware.AuthenticationMiddleware())
 	protected.Use(middleware.AuthorizationMiddleware([]string{"SA", "AS", "D", "P"}))
@@ -51,12 +59,10 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	protected.Get("/my/profile", authHandler.GetMyProfile)
 	protected.Post("/logout", authHandler.Logout)
 
+	////////////////////////////////////// SUPER ADMIN //////////////////////////////////////
+	
 	protectedSuperAdmin := protected.Group("/superadmin")
 	protectedSuperAdmin.Use(middleware.AuthorizationMiddleware([]string{"SA"}))
-
-	protectedSchoolAdmin := protected.Group("/school")
-	protectedSchoolAdmin.Use(middleware.AuthorizationMiddleware([]string{"AS"}))
-	protectedSchoolAdmin.Use(middleware.SchoolAdminMiddleware(userService))
 
 	// USER FOR SUPERADMIN
 	protectedSuperAdmin.Get("/user/sa/all", userHandler.GetAllSuperAdmin)
@@ -88,17 +94,23 @@ func Route(r *fiber.App, db *sqlx.DB) {
 
 	////////////////////////////////////// SCHOOL ADMIN //////////////////////////////////////
 
-	protectedSchoolAdmin.Get("/user/driver/all", userHandler.GetAllPermittedDriver)
-	// protectedSchoolAdmin.Post("/user/driver/add", handler.AddSchoolDriver)
-	// protectedSchoolAdmin.Put("/user/driver/update/:id", handler.UpdateSchoolDriver)
-	//protectedSchoolAdmin.Delete("/user/driver/delete/:id", handler.DeleteSchoolDriver)
-	
-	// protectedSchoolAdmin.Get("/student/all", handler.GetAllStudentWithParents)
-	// protectedSchoolAdmin.Post("/student/add", handler.AddSchoolStudentWithParents)
-	// protectedSchoolAdmin.Put("/student/update/:id", handler.UpdateSchoolStudentWithParents)
-	// protectedSchoolAdmin.Delete("/student/delete/:id", handler.DeleteSchoolStudentWithParents)
+	protectedSchoolAdmin := protected.Group("/school")
+	protectedSchoolAdmin.Use(middleware.AuthorizationMiddleware([]string{"AS"}))
+	protectedSchoolAdmin.Use(middleware.SchoolAdminMiddleware(userService))
 
-	protectedSchoolAdmin.Get("/route/all", handler.GetAllRoutes)
-	protectedSchoolAdmin.Get("/route/:id", handler.GetSpecRoute)
-	protectedSchoolAdmin.Post("/route/add", handler.AddRoute)
+	// STUDENT FOR SCHOOL ADMIN
+	protectedSchoolAdmin.Get("/student/all", studentHandler.GetAllStudentWithParents)
+	protectedSchoolAdmin.Get("/student/:id", studentHandler.GetSpecStudentWithParents)
+	protectedSchoolAdmin.Post("/student/add", studentHandler.AddSchoolStudentWithParents)
+	protectedSchoolAdmin.Put("/student/update/:id", studentHandler.UpdateSchoolStudentWithParents)
+	protectedSchoolAdmin.Delete("/student/delete/:id", studentHandler.DeleteSchoolStudentWithParentsIfNeccessary)
+
+	protectedSchoolAdmin.Get("/user/driver/all", userHandler.GetAllPermittedDriver)
+	protectedSchoolAdmin.Get("/user/driver/:id", userHandler.GetSpecPermittedDriver)
+	protectedSchoolAdmin.Post("/user/driver/add", userHandler.AddSchoolDriver)
+	protectedSchoolAdmin.Put("/user/driver/update/:id", userHandler.UpdateSchoolDriver)
+	protectedSchoolAdmin.Delete("/user/driver/delete/:id", userHandler.DeleteSchoolDriver)
+
+	// ROUTE FOR SCHOOL ADMIN
+	protectedSchoolAdmin.Get("/route/add", routeHandler.AddRoute)
 }

@@ -3,8 +3,8 @@
 CREATE TABLE users (
     user_id BIGINT PRIMARY KEY,
     user_uuid UUID UNIQUE NOT NULL,
-    user_username VARCHAR(255) UNIQUE NOT NULL,
-    user_email VARCHAR(255) UNIQUE NOT NULL,
+    user_username VARCHAR(255) NOT NULL,
+    user_email VARCHAR(255) NOT NULL,
     user_password VARCHAR(255) NOT NULL,
     user_role VARCHAR(20) NOT NULL,
     user_role_code VARCHAR (5),
@@ -19,6 +19,8 @@ CREATE TABLE users (
 );
 
 CREATE INDEX idx_user_uuid ON users(user_uuid);
+CREATE INDEX idx_user_username ON users(user_username);
+CREATE INDEX idx_user_email ON users(user_email);
 -- +goose StatementEnd
 
 -- +goose Down

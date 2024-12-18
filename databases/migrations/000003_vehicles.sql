@@ -6,7 +6,7 @@ CREATE TABLE vehicles (
     school_uuid UUID NULL REFERENCES schools(school_uuid) ON DELETE SET NULL,
     driver_uuid UUID NULL,
     vehicle_name VARCHAR(50) NOT NULL,
-    vehicle_number VARCHAR(20) NOT NULL UNIQUE,
+    vehicle_number VARCHAR(20) NOT NULL,
     vehicle_type VARCHAR(20) NOT NULL,
     vehicle_color VARCHAR(20) NOT NULL,
     vehicle_seats INT NOT NULL,

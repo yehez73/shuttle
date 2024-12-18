@@ -1,328 +1,264 @@
 package services
 
 import (
-	"context"
+	"database/sql"
+	"shuttle/errors"
+	"shuttle/models/dto"
+	"shuttle/models/entity"
+	"shuttle/repositories"
+	"time"
 
-	// "shuttle/errors"
-	"shuttle/databases"
-	"shuttle/models"
-
-	"github.com/spf13/viper"
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"github.com/google/uuid"
 )
 
-func GetAllPermitedSchoolStudentsWithParents(schoolID primitive.ObjectID) ([]models.SchoolStudentParentResponse, error) {
-	client, err := databases.MongoConnection()
+type StudentServiceInterface interface {
+	GetAllStudentsWithParents(page int, limit int, sortField string, sortDirection string, schoolUUIDStr string) ([]dto.SchoolStudentParentResponseDTO, int, error)
+	GetSpecStudentWithParents(id, schoolUUIDStr string) (dto.SchoolStudentParentResponseDTO, error)
+	AddSchoolStudentWithParents(student dto.SchoolStudentParentRequestDTO, schoolUUID string, username string) error
+	UpdateSchoolStudentWithParents(id string, student dto.SchoolStudentParentRequestDTO, schoolUUID, username string) error
+	DeleteSchoolStudentWithParentsIfNeccessary(id, schoolUUID, username string) error
+}
+
+type StudentService struct {
+	userService       UserServiceInterface
+	studentRepository repositories.StudentRepositoryInterface
+	userRepository    repositories.UserRepositoryInterface
+}
+
+func NewStudentService(studentRepository repositories.StudentRepositoryInterface, userService UserServiceInterface, userRepository repositories.UserRepositoryInterface) StudentService {
+	return StudentService{
+		userService:       userService,
+		studentRepository: studentRepository,
+		userRepository:    userRepository,
+	}
+}
+
+func (service *StudentService) GetAllStudentsWithParents(page int, limit int, sortField string, sortDirection string, schoolUUIDStr string) ([]dto.SchoolStudentParentResponseDTO, int, error) {
+	offset := (page - 1) * limit
+
+	students, parent, err := service.studentRepository.FetchAllStudentsWithParents(offset, limit, sortField, sortDirection, schoolUUIDStr)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	collection := client.Database(viper.GetString("MONGO_DB")).Collection("students")
-
-	var students []models.Student
-	cursor, err := collection.Find(context.Background(), bson.M{"school_id": schoolID})
+	total, err := service.studentRepository.CountAllStudentsWithParents(schoolUUIDStr)
 	if err != nil {
-		return nil, err
-	}
-	defer cursor.Close(context.Background())
-
-	for cursor.Next(context.Background()) {
-		var student models.Student
-		if err := cursor.Decode(&student); err != nil {
-
-			return nil, err
-		}
-		students = append(students, student)
+		return nil, 0, err
 	}
 
-	if err := cursor.Err(); err != nil {
-		return nil, err
-	}
+	var studentsWithParents []dto.SchoolStudentParentResponseDTO
 
-	var Parents []models.ParentResponse
-	parentCollection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
 	for _, student := range students {
-		var parent models.ParentResponse
-		err := parentCollection.FindOne(context.Background(), bson.M{"_id": student.ParentID}, options.FindOne().SetProjection(bson.M{"password": 0})).Decode(&parent)
-		if err != nil {
-
-			return nil, err
+		var parentName string
+		if student.ParentUUID == uuid.Nil {
+			parentName = "N/A"
+		} else {
+			parentName = parent.FirstName + " " + parent.LastName
 		}
-		Parents = append(Parents, parent)
-	}
 
-	var schoolStudents []models.SchoolStudentParentResponse
-	for i, student := range students {
-		schoolStudents = append(schoolStudents, models.SchoolStudentParentResponse{
-			Student: student,
-			Parent:  Parents[i],
+		studentsWithParents = append(studentsWithParents, dto.SchoolStudentParentResponseDTO{
+			StudentUUID:      student.StudentUUID.String(),
+			ParentName:       parentName,
+			StudentFirstName: student.StudentFirstName,
+			StudentLastName:  student.StudentLastName,
+			StudentGender:    dto.Gender(student.StudentGender),
+			StudentGrade:     student.StudentGrade,
+			Address:          parent.Address,
+			CreatedAt:        safeTimeFormat(student.CreatedAt),
 		})
 	}
 
-	return schoolStudents, nil
+	return studentsWithParents, total, nil
 }
 
-// func AddPermittedSchoolStudentWithParents(student models.SchoolStudentRequest, schoolID primitive.ObjectID, username string) error {
-// 	client, err := databases.MongoConnection()
-// 	if err != nil {
-// 		return err
-// 	}
+func (service *StudentService) GetSpecStudentWithParents(id, schoolUUIDStr string) (dto.SchoolStudentParentResponseDTO, error) {
+	studentUUID, err := uuid.Parse(id)
+	if err != nil {
+		return dto.SchoolStudentParentResponseDTO{}, err
+	}
 
-// 	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-// 	var existingParent models.User
-// 	// Email as unique identifier for parent
-// 	err = collection.FindOne(context.Background(), bson.M{"email": student.Parent.Email, "role": models.Parent}).Decode(&existingParent)
+	student, parent, err := service.studentRepository.FetchSpecStudentWithParents(studentUUID, schoolUUIDStr)
+	if err != nil {
+		return dto.SchoolStudentParentResponseDTO{}, err
+	}
 
-// 	// If parent is not yet added, add the parent
-// 	var parentID primitive.ObjectID
-// 	if err == nil {
-// 		parentID = existingParent.ID
-// 	} else if err == mongo.ErrNoDocuments {
-// 		parentUser := student.Parent
-// 		parentUser.Role = models.Parent
+	var parentName string
+	if student.ParentUUID == uuid.Nil {
+		parentName = "N/A"
+	} else {
+		parentName = parent.FirstName + " " + parent.LastName
+	}
 
-// 		parentUser.Details = &models.ParentDetails{
-// 			Children: []primitive.ObjectID{},
-// 		}
+	return dto.SchoolStudentParentResponseDTO{
+		StudentUUID:      student.StudentUUID.String(),
+		ParentUUID:       student.ParentUUID.String(),
+		ParentName:       parentName,
+		ParentPhone:      parent.Phone,
+		StudentFirstName: student.StudentFirstName,
+		StudentLastName:  student.StudentLastName,
+		StudentGender:    dto.Gender(student.StudentGender),
+		StudentGrade:     student.StudentGrade,
+		Address:          parent.Address,
+		CreatedAt:        safeTimeFormat(student.CreatedAt),
+		CreatedBy:        safeStringFormat(student.CreatedBy),
+		UpdatedAt:        safeTimeFormat(student.UpdatedAt),
+		UpdatedBy:        safeStringFormat(student.UpdatedBy),
+	}, nil
+}
 
-// 		parentID, err = AddUser(parentUser, username)
-// 		if err != nil {
+func (service *StudentService) AddSchoolStudentWithParents(student dto.SchoolStudentParentRequestDTO, schoolUUID string, username string) error {
+	var parentID uuid.UUID
 
-// 			return err
-// 		}
-// 	} else {
-// 		return err
-// 	}
+	parentExists, err := service.userRepository.CheckEmailExist("", student.Parent.Email)
+	if err != nil {
+		return err
+	}
 
-// 	studentDocument := bson.D{
-// 		{Key: "first_name", Value: student.Student.FirstName},
-// 		{Key: "last_name", Value: student.Student.LastName},
-// 		{Key: "class", Value: student.Student.Class},
-// 		{Key: "parent_id", Value: parentID},
-// 		{Key: "school_id", Value: schoolID},
-// 	}
+	tx, err := service.userRepository.BeginTransaction()
+	if err != nil {
+		return err
+	}
 
-// 	studentsCollection := client.Database(viper.GetString("MONGO_DB")).Collection("students")
-// 	result, err := studentsCollection.InsertOne(context.Background(), studentDocument)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	studentID := result.InsertedID.(primitive.ObjectID)
-
-// 	_, err = collection.UpdateOne(
-// 		context.Background(),
-// 		bson.M{"_id": parentID},
-// 		bson.M{"$push": bson.M{"details.children_id": studentID}},
-// 	)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	return nil
-// }
-
-// func UpdatePermittedSchoolStudentWithParents(id string, student models.SchoolStudentRequest, schoolID primitive.ObjectID) error {
-//     client, err := databases.MongoConnection()
-//     if err != nil {
-//         return err
-//     }
-
-//     collection := client.Database(viper.GetString("MONGO_DB")).Collection("students")
-//     objectID, err := primitive.ObjectIDFromHex(id)
-//     if err != nil {
-//         return err
-//     }
-
-// 	if err := CheckStudentAvailability(objectID, schoolID); err != nil {
-//         return err
-//     }
-
-// 	// Pipeline to get the student and parent details
-//     var existingStudent models.SchoolStudentRequest
-//     pipeline := mongo.Pipeline{
-//         bson.D{{Key: "$match", Value: bson.M{"_id": objectID, "school_id": schoolID}}},
-//         bson.D{{Key: "$lookup", Value: bson.M{
-//             "from":         "users",
-//             "localField":   "parent_id",
-//             "foreignField": "_id",
-//             "as":           "parent",
-//         }}},
-//         bson.D{{Key: "$unwind", Value: bson.M{"path": "$parent"}}},
-//     }
-
-// 	// Aggregate the pipeline
-//     cursor, err := collection.Aggregate(context.Background(), pipeline)
-//     if err != nil {
-//         return err
-//     }
-//     defer cursor.Close(context.Background())
-
-//     if cursor.Next(context.Background()) {
-//         if err := cursor.Decode(&existingStudent); err != nil {
-
-//             return err
-//         }
-//     }
-
-//     if (models.User{}) == existingStudent.Parent {
-//         return errors.New("parent details are not available", 404)
-//     }
-
-//     updateStudent := bson.M{
-//         "first_name": student.FirstName,
-//         "last_name":  student.LastName,
-//     }
-
-//     _, err = collection.UpdateOne(context.Background(), bson.M{"_id": objectID, "school_id": schoolID}, bson.M{"$set": updateStudent})
-//     if err != nil {
-//         return err
-//     }
-
-// 	// If the parent details are changed, update the parent details
-//     if (models.User{}) != student.Parent && student.Parent != existingStudent.Parent {
-//         parentCollection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-//         parentID := existingStudent.Parent.ID
-
-//         updateParent := bson.M{
-//             "first_name": student.Parent.FirstName,
-//             "last_name":  student.Parent.LastName,
-//             "email":      student.Parent.Email,
-// 			"phone":    student.Parent.Phone,
-//             "address":  student.Parent.Address,
-//             "details": bson.M{
-//                 "children": []primitive.ObjectID{objectID},
-//             },
-//         }
-
-//         _, err = parentCollection.UpdateOne(context.Background(), bson.M{"_id": parentID}, bson.M{"$set": updateParent})
-//         if err != nil {
-
-//             return err
-//         }
-//     } else { // Else, parent remains the same
-//         _, err = client.Database(viper.GetString("MONGO_DB")).Collection("users").UpdateOne(
-//             context.Background(),
-//             bson.M{"_id": existingStudent.Parent.ID},
-//             bson.M{"$addToSet": bson.M{"parent_details.children": objectID}},
-//         )
-//         if err != nil {
-
-//             return err
-//         }
-//     }
-
-//     return nil
-// }
-
-// func DeletePermittedSchoolStudentWithParents(id string, schoolID primitive.ObjectID) error {
-// 	client, err := databases.MongoConnection()
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	collection := client.Database(viper.GetString("MONGO_DB")).Collection("students")
-// 	objectID, err := primitive.ObjectIDFromHex(id)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	if err := CheckStudentAvailability(objectID, schoolID); err != nil {
-// 		return err
-// 	}
-
-// 	var student models.Student
-// 	err = collection.FindOne(context.Background(), bson.M{"_id": objectID, "school_id": schoolID}).Decode(&student)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	_, err = collection.DeleteOne(context.Background(), bson.M{"_id": objectID, "school_id": schoolID})
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	// Remove the student from the parent's children list
-// 	parentCollection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-// 	_, err = parentCollection.UpdateOne(
-// 		context.Background(),
-// 		bson.M{"_id": student.ParentID},
-// 		bson.M{"$pull": bson.M{"parent_details.children": objectID}},
-// 	)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	var parent models.User
-// 	err = parentCollection.FindOne(context.Background(), bson.M{"_id": student.ParentID}).Decode(&parent)
-// 	if err != nil {
-// 		return err
-// 	}
-
-// 	// If the children array is empty, delete the parent
-// 	if len(parent.Details.(models.ParentDetails).Children) == 0 {
-// 		_, err = parentCollection.DeleteOne(context.Background(), bson.M{"_id": student.ParentID})
-// 		if err != nil {
-// 			return err
-// 		}
-// 	}
-
-// 	return nil
-// }
-
-
-// func CheckPermittedSchoolAccess(userID string) (primitive.ObjectID, error) {
-// 	client, err := databases.MongoConnection()
-// 	if err != nil {
-// 		return primitive.NilObjectID, err
-// 	}
-
-// 	objectID, err := primitive.ObjectIDFromHex(userID)
-// 	if err != nil {
-// 		return primitive.NilObjectID, err
-// 	}
-
-// 	collection := client.Database(viper.GetString("MONGO_DB")).Collection("users")
-
-// 	var user models.User
-// 	err = collection.FindOne(context.Background(), bson.M{"_id": objectID}).Decode(&user)
-// 	if err != nil {
-// 		return primitive.NilObjectID, err
-// 	}
-
-// 	var schoolAdminDetails models.SchoolAdminDetails
-// 	detailsBytes, err := bson.Marshal(user.Details)
-// 	if err != nil {
-// 		return primitive.NilObjectID, err
-// 	}
-
-// 	err = bson.Unmarshal(detailsBytes, &schoolAdminDetails)
-// 	if err != nil || schoolAdminDetails.SchoolID.IsZero() {
-// 		return primitive.NilObjectID, err
-// 	}
-
-// 	return schoolAdminDetails.SchoolID, nil
-// }
-
-func CheckStudentAvailability(studentID primitive.ObjectID, schoolID primitive.ObjectID) error {
-    client, err := databases.MongoConnection()
-    if err != nil {
-        return err
-    }
-
-    collection := client.Database(viper.GetString("MONGO_DB")).Collection("students")
-
-    var student models.SchoolStudentRequest
-    err = collection.FindOne(context.Background(), bson.M{"_id": studentID, "school_id": schoolID}).Decode(&student)
-    if err != nil {
-        if err == mongo.ErrNoDocuments {
-            return err
+	var transactionError error
+	defer func() {
+		if transactionError != nil {
+			tx.Rollback()
+		} else {
+			tx.Commit()
 		}
-        return err
-    }
+	}()
 
-    return nil
+	if !parentExists {
+		newParent := &dto.UserRequestsDTO{
+			Username:  student.Parent.Username,
+			FirstName: student.Parent.FirstName,
+			LastName:  student.Parent.LastName,
+			Gender:    student.Parent.Gender,
+			Email:     student.Parent.Email,
+			Password:  student.Parent.Password,
+			Role:      dto.Role(entity.Parent),
+			RoleCode:  "P",
+			Phone:     student.Parent.Phone,
+			Address:   student.Parent.Address,
+		}
+
+		parentID, err = service.userService.AddUser(*newParent, username)
+		if err != nil {
+			transactionError = err
+			return transactionError
+		}
+	} else {
+		parentID, err = service.userRepository.FetchUUIDByEmail(student.Parent.Email)
+		if err != nil {
+			return transactionError
+		}
+	}
+
+	newStudent := &entity.Student{
+		StudentID:        time.Now().UnixMilli()*1e6 + int64(uuid.New().ID()%1e6),
+		StudentUUID:      uuid.New(),
+		ParentUUID:       parentID,
+		SchoolUUID:       *parseSafeUUID(schoolUUID),
+		StudentFirstName: student.Student.StudentFirstName,
+		StudentLastName:  student.Student.StudentLastName,
+		StudentGender:    string(student.Student.StudentGender),
+		StudentGrade:     student.Student.StudentGrade,
+		CreatedBy:        sql.NullString{String: username, Valid: true},
+	}
+
+	err = service.studentRepository.SaveStudent(*newStudent)
+	if err != nil {
+		transactionError = err
+		return transactionError
+	}
+
+	return nil
+}
+
+func (service *StudentService) UpdateSchoolStudentWithParents(id string, student dto.SchoolStudentParentRequestDTO, schoolUUID, username string) error {
+
+	println("first line")
+
+	studentUUID, err := uuid.Parse(id)
+	if err != nil {
+		return err
+	}
+
+	println("second line")
+
+	_, err = service.userRepository.CheckEmailExist(id, student.Parent.Email)
+	if err != nil {
+		return err
+	}
+
+	println("third line")
+	tx, err := service.userRepository.BeginTransaction()
+	if err != nil {
+		return err
+	}
+
+	println("fourth line")
+
+	var transactionError error
+	defer func() {
+		if transactionError != nil {
+			tx.Rollback()
+		} else {
+			tx.Commit()
+		}
+	}()
+
+	println("fifth line")
+	println("email: ", student.Parent.Email)
+
+	var parentData entity.ParentDetails
+	_, parentData, err = service.studentRepository.FetchSpecStudentWithParents(studentUUID, schoolUUID)
+	if err != nil {
+		transactionError = err
+		return transactionError
+	}
+
+	println("sixth line")
+
+	studentEntity := &entity.Student{
+		StudentUUID:      studentUUID,
+		ParentUUID:       parentData.UserUUID,
+		SchoolUUID:       *parseSafeUUID(schoolUUID),
+		StudentFirstName: student.Student.StudentFirstName,
+		StudentLastName:  student.Student.StudentLastName,
+		StudentGender:    string(student.Student.StudentGender),
+		StudentGrade:     student.Student.StudentGrade,
+		UpdatedBy:        sql.NullString{String: username, Valid: true},
+	}
+
+	
+	println("sampe sini")
+
+	err = service.studentRepository.UpdateStudent(*studentEntity)
+	if err != nil {
+		transactionError = err
+		return transactionError
+	}
+
+	err = service.userService.UpdateUser(parentData.UserUUID.String(), student.Parent, username, nil)
+	if err != nil {
+		transactionError = err
+		return transactionError
+	}
+
+	return nil
+}
+
+func (service *StudentService) DeleteSchoolStudentWithParentsIfNeccessary(id, schoolUUID, username string) error {
+	studentUUID, err := uuid.Parse(id)
+	if err != nil {
+		return err
+	}
+
+	_, _,err = service.studentRepository.FetchSpecStudentWithParents(studentUUID, schoolUUID)
+	if err != nil {
+		return errors.New("student not found", 404)	
+	}
+
+	return service.studentRepository.DeleteStudentWithParents(studentUUID, schoolUUID, username)
 }

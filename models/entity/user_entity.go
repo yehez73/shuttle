@@ -2,6 +2,7 @@ package entity
 
 import (
 	"database/sql"
+	"encoding/json"
 
 	"github.com/google/uuid"
 )
@@ -20,22 +21,22 @@ const (
 )
 
 type User struct {
-	ID         int64        `db:"user_id"`
-	UUID       uuid.UUID    `db:"user_uuid"`
-	Username   string       `db:"user_username"`
-	Email      string       `db:"user_email"`
-	Password   string       `db:"user_password"`
-	Role       Role         `db:"user_role"`
-	RoleCode   string       `db:"user_role_code"`
-	Status     string       `db:"user_status"`
-	LastActive sql.NullTime `db:"user_last_active"`
-	Details    interface{}
-	CreatedAt  sql.NullTime   `db:"created_at"`
-	CreatedBy  sql.NullString `db:"created_by"`
-	UpdatedAt  sql.NullTime   `db:"updated_at"`
-	UpdatedBy  sql.NullString `db:"updated_by"`
-	DeletedAt  sql.NullTime   `db:"deleted_at"`
-	DeletedBy  sql.NullString `db:"deleted_by"`
+	ID          int64           `db:"user_id"`
+	UUID        uuid.UUID       `db:"user_uuid"`
+	Username    string          `db:"user_username"`
+	Email       string          `db:"user_email"`
+	Password    string          `db:"user_password"`
+	Role        Role            `db:"user_role"`
+	RoleCode    string          `db:"user_role_code"`
+	Status      string          `db:"user_status"`
+	LastActive  sql.NullTime    `db:"user_last_active"`
+	DetailsJSON json.RawMessage `db:"user_details"`
+	CreatedAt   sql.NullTime    `db:"created_at"`
+	CreatedBy   sql.NullString  `db:"created_by"`
+	UpdatedAt   sql.NullTime    `db:"updated_at"`
+	UpdatedBy   sql.NullString  `db:"updated_by"`
+	DeletedAt   sql.NullTime    `db:"deleted_at"`
+	DeletedBy   sql.NullString  `db:"deleted_by"`
 }
 
 type SuperAdminDetails struct {

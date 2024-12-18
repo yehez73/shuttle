@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"time"
 
@@ -61,7 +62,6 @@ func (service AuthService) Login(email, password string) (userData dto.UserDataO
 }
 
 func (service *AuthService) GetMyProfile(userUUID, roleCode string) (interface{}, error) {
-
 	user, err := service.userRepository.FetchSpecificUser(userUUID)
 	if err != nil {
 		return nil, err
@@ -72,6 +72,7 @@ func (service *AuthService) GetMyProfile(userUUID, roleCode string) (interface{}
 		return nil, errors.New("invalid user UUID format", 0)
 	}
 
+	var details json.RawMessage
 	switch user.RoleCode {
 	case "SA":
 		superAdminDetails, err := service.userRepository.FetchSuperAdminDetails(parsedUserUUID)
@@ -88,28 +89,18 @@ func (service *AuthService) GetMyProfile(userUUID, roleCode string) (interface{}
 			superAdminDetails.Picture = imageURL
 		}
 
-		details := dto.SuperAdminDetailsResponseDTO{
+		details, err = json.Marshal(dto.SuperAdminDetailsResponseDTO{
 			Picture:   superAdminDetails.Picture,
 			FirstName: superAdminDetails.FirstName,
 			LastName:  superAdminDetails.LastName,
 			Gender:    dto.Gender(superAdminDetails.Gender),
 			Phone:     superAdminDetails.Phone,
 			Address:   superAdminDetails.Address,
+		})
+		if err != nil {
+			return nil, err
 		}
 
-		result := dto.UserResponseDTO{
-			UUID:       user.UUID.String(),
-			Username:   user.Username,
-			Email:      user.Email,
-			Role:       dto.Role(user.Role),
-			RoleCode:   user.RoleCode,
-			Status:     user.Status,
-			LastActive: safeTimeFormat(user.LastActive),
-			Details:    details,
-			CreatedAt:  safeTimeFormat(user.CreatedAt),
-		}
-
-		return result, nil
 	case "AS":
 		schoolAdminDetails, err := service.userRepository.FetchSchoolAdminDetails(parsedUserUUID)
 		if err != nil {
@@ -125,27 +116,17 @@ func (service *AuthService) GetMyProfile(userUUID, roleCode string) (interface{}
 			schoolAdminDetails.Picture = imageURL
 		}
 
-		details := dto.SchoolAdminDetailsResponseDTO{
+		details, err = json.Marshal(dto.SchoolAdminDetailsResponseDTO{
 			FirstName: schoolAdminDetails.FirstName,
 			LastName:  schoolAdminDetails.LastName,
 			Gender:    dto.Gender(schoolAdminDetails.Gender),
 			Phone:     schoolAdminDetails.Phone,
 			Address:   schoolAdminDetails.Address,
+		})
+		if err != nil {
+			return nil, err
 		}
 
-		result := dto.UserResponseDTO{
-			UUID:       user.UUID.String(),
-			Username:   user.Username,
-			Email:      user.Email,
-			Role:       dto.Role(user.Role),
-			RoleCode:   user.RoleCode,
-			Status:     user.Status,
-			LastActive: safeTimeFormat(user.LastActive),
-			Details:    details,
-			CreatedAt:  safeTimeFormat(user.CreatedAt),
-		}
-
-		return result, nil
 	case "P":
 		parentDetails, err := service.userRepository.FetchParentDetails(parsedUserUUID)
 		if err != nil {
@@ -161,27 +142,17 @@ func (service *AuthService) GetMyProfile(userUUID, roleCode string) (interface{}
 			parentDetails.Picture = imageURL
 		}
 
-		details := dto.ParentDetailsResponseDTO{
+		details, err = json.Marshal(dto.ParentDetailsResponseDTO{
 			FirstName: parentDetails.FirstName,
 			LastName:  parentDetails.LastName,
 			Gender:    dto.Gender(parentDetails.Gender),
 			Phone:     parentDetails.Phone,
 			Address:   parentDetails.Address,
+		})
+		if err != nil {
+			return nil, err
 		}
 
-		result := dto.UserResponseDTO{
-			UUID:       user.UUID.String(),
-			Username:   user.Username,
-			Email:      user.Email,
-			Role:       dto.Role(user.Role),
-			RoleCode:   user.RoleCode,
-			Status:     user.Status,
-			LastActive: safeTimeFormat(user.LastActive),
-			Details:    details,
-			CreatedAt:  safeTimeFormat(user.CreatedAt),
-		}
-
-		return result, nil
 	case "D":
 		driverDetails, err := service.userRepository.FetchDriverDetails(parsedUserUUID)
 		if err != nil {
@@ -197,30 +168,34 @@ func (service *AuthService) GetMyProfile(userUUID, roleCode string) (interface{}
 			driverDetails.Picture = imageURL
 		}
 
-		details := dto.DriverDetailsResponseDTO{
+		details, err = json.Marshal(dto.DriverDetailsResponseDTO{
 			FirstName: driverDetails.FirstName,
 			LastName:  driverDetails.LastName,
 			Gender:    dto.Gender(driverDetails.Gender),
 			Phone:     driverDetails.Phone,
 			Address:   driverDetails.Address,
+		})
+		if err != nil {
+			return nil, err
 		}
 
-		result := dto.UserResponseDTO{
-			UUID:       user.UUID.String(),
-			Username:   user.Username,
-			Email:      user.Email,
-			Role:       dto.Role(user.Role),
-			RoleCode:   user.RoleCode,
-			Status:     user.Status,
-			LastActive: safeTimeFormat(user.LastActive),
-			Details:    details,
-			CreatedAt:  safeTimeFormat(user.CreatedAt),
-		}
-
-		return result, nil
 	default:
 		return nil, errors.New("invalid role code", 0)
 	}
+
+	result := dto.UserResponseDTO{
+		UUID:       user.UUID.String(),
+		Username:   user.Username,
+		Email:      user.Email,
+		Role:       dto.Role(user.Role),
+		RoleCode:   user.RoleCode,
+		Status:     user.Status,
+		LastActive: safeTimeFormat(user.LastActive),
+		Details:    details,
+		CreatedAt:  safeTimeFormat(user.CreatedAt),
+	}
+
+	return result, nil
 }
 
 func (service *AuthService) CheckStoredRefreshToken(userUUID string, refreshToken string) error {
