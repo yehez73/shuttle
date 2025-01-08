@@ -13,7 +13,7 @@ type AuthRepositoryInterface interface {
 	CheckRefreshTokenData(userUUID, token string) (entity.RefreshToken, error)
 	DeleteRefreshToken(ctx context.Context, userUUID string) error
 	UpdateUserStatus(userUUID, status string, lastActive time.Time) error
-	UpdateRefreshToken(userUUID, refreshToken string) (time.Time, error)
+	UpdateRefreshToken(userUUID, newRefreshToken string) error
 }
 
 type authRepository struct {
@@ -104,29 +104,16 @@ func (r *authRepository) UpdateUserStatus(userUUID, status string, lastActive ti
 	return nil
 }
 
-func (r *authRepository) UpdateRefreshToken(userUUID, refreshToken string) (time.Time, error) {
-	var lastUsedAt time.Time
-	
-	querySelect := `
-		SELECT last_used_at 
-		FROM refresh_tokens 
-		WHERE user_uuid = $1 AND refresh_token = $2
-	`
-	err := r.DB.QueryRow(querySelect, userUUID, refreshToken).Scan(&lastUsedAt)
-	if err != nil {
-		return time.Time{}, err
-	}
-
-	// Query untuk update last_used_at ke NOW()
+func (r *authRepository) UpdateRefreshToken(userUUID, newRefreshToken string) error {
 	queryUpdate := `
 		UPDATE refresh_tokens
-		SET last_used_at = NOW()
-		WHERE user_uuid = $1 AND refresh_token = $2
+		SET refresh_token = $2, last_used_at = NOW()
+		WHERE user_uuid = $1
 	`
-	_, err = r.DB.Exec(queryUpdate, userUUID, refreshToken)
+	_, err := r.DB.Exec(queryUpdate, userUUID, newRefreshToken)
 	if err != nil {
-		return time.Time{}, err
+		return err
 	}
 
-	return lastUsedAt, nil
+	return nil
 }

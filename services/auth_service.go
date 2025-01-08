@@ -22,7 +22,7 @@ type AuthServiceInterface interface {
 	CheckStoredRefreshToken(userID string, refreshToken string) error
 	DeleteRefreshTokenOnLogout(ctx context.Context, userID string) error
 	UpdateUserStatus(userUUID, status string, lastActive time.Time) error
-	UpdateRefreshToken(userUUID, refreshToken string) error
+	UpdateRefreshToken(userUUID, refreshToken, newRefreshToken string) error
 }
 
 type AuthService struct {
@@ -233,19 +233,19 @@ func (service *AuthService) UpdateUserStatus(userUUID, status string, lastActive
 	return nil
 }
 
-func (service *AuthService) UpdateRefreshToken(userUUID, refreshToken string) error {
+func (service *AuthService) UpdateRefreshToken(userUUID, refreshToken, newRefreshToken string) error {
 	tokendata, err := service.authRepository.CheckRefreshTokenData(userUUID, refreshToken)
 	if err != nil {
-		return err
+		return errors.New("Invalid refresh token", 401)
 	}
 
-	if tokendata.LastUsedAt != nil && time.Since(*tokendata.LastUsedAt) > time.Hour {
-		_, err := service.authRepository.UpdateRefreshToken(userUUID, refreshToken)
-		if err != nil {
-			return err
-		}
-	} else {
+	if tokendata.LastUsedAt != nil && time.Since(*tokendata.LastUsedAt) < time.Second {
 		return errors.New("cannot reissue a new access token yet", 0)
+	}
+
+	err = service.authRepository.UpdateRefreshToken(userUUID, newRefreshToken)
+	if err != nil {
+		return err
 	}
 
 	return nil

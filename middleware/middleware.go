@@ -38,11 +38,6 @@ func AuthenticationMiddleware() fiber.Handler {
 			token = token[len(bearerPrefix):]
 		}
 
-		_, exists := utils.InvalidTokens[token]
-		if exists {
-			return utils.UnauthorizedResponse(c, "Invalid token or you have been logged out", nil)
-		}
-
 		claims, err := utils.ValidateToken(token)
 		if err != nil {
 			logger.LogWarn("Invalid token", map[string]interface{}{"error": err.Error()})

@@ -113,7 +113,11 @@ func (handler *schoolHandler) GetSpecSchool(c *fiber.Ctx) error {
 }
 
 func (handler *schoolHandler) AddSchool(c *fiber.Ctx) error {
-	username := c.Locals("user_name").(string)
+	username, ok := c.Locals("user_name").(string)
+	if !ok {
+		logger.LogError(nil, "Failed to fetch username from context", nil)
+		return utils.UnauthorizedResponse(c, "Unauthorized user", nil)
+	}
 
 	school := new(dto.SchoolRequestDTO)
 	if err := c.BodyParser(school); err != nil {
@@ -181,6 +185,7 @@ func isValidSortFieldForSchools(field string) bool {
 	allowedFields := map[string]bool{
 		"school_name": true,
 		"school_id":   true,
+		"school_point": true,
 	}
 	return allowedFields[field]
 }

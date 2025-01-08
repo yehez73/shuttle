@@ -14,6 +14,7 @@ type School struct {
 	Contact     string         `db:"school_contact"`
 	Email       string         `db:"school_email"`
 	Description string         `db:"school_description"`
+	Point       sql.NullString `db:"school_point"`
 	CreatedAt   sql.NullTime   `db:"created_at"`
 	CreatedBy   sql.NullString `db:"created_by"`
 	UpdatedAt   sql.NullTime   `db:"updated_at"`

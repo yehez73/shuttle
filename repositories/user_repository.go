@@ -39,10 +39,10 @@ type UserRepositoryInterface interface {
 	FetchDriverDetails(userUUID uuid.UUID) (entity.DriverDetails, error)
 
 	SaveUser(tx *sqlx.Tx, user entity.User) (uuid.UUID, error)
-	SaveSuperAdminDetails(tx *sqlx.Tx, details entity.SuperAdminDetails, userUUID uuid.UUID, params interface{}) error
-	SaveSchoolAdminDetails(tx *sqlx.Tx, details entity.SchoolAdminDetails, userUUID uuid.UUID, params interface{}) error
-	SaveParentDetails(tx *sqlx.Tx, details entity.ParentDetails, userUUID uuid.UUID, params interface{}) error
-	SaveDriverDetails(tx *sqlx.Tx, details entity.DriverDetails, userUUID uuid.UUID, params interface{}) error
+	SaveSuperAdminDetails(tx *sqlx.Tx, details entity.SuperAdminDetails, userUUID uuid.UUID) error
+	SaveSchoolAdminDetails(tx *sqlx.Tx, details entity.SchoolAdminDetails, userUUID uuid.UUID) error
+	SaveParentDetails(tx *sqlx.Tx, details entity.ParentDetails, userUUID uuid.UUID) error
+	SaveDriverDetails(tx *sqlx.Tx, details entity.DriverDetails, userUUID uuid.UUID) error
 
 	UpdateUser(tx *sqlx.Tx, user entity.User, userUUID string) error
 	UpdateSuperAdminDetails(tx *sqlx.Tx, details entity.SuperAdminDetails, userUUID string) error
@@ -166,6 +166,12 @@ func (r *userRepository) FetchSpecDriverForPermittedSchool(userUUID, schoolUUID 
 				END,
 				'N/A'
 			) AS school_name,
+			 COALESCE(
+				CASE
+					WHEN v.deleted_at IS NULL THEN v.vehicle_name
+				END,
+				'N/A'
+			) AS vehicle_name,
 			COALESCE(
 				CASE
 					WHEN v.deleted_at IS NULL THEN v.vehicle_number
@@ -181,9 +187,9 @@ func (r *userRepository) FetchSpecDriverForPermittedSchool(userUUID, schoolUUID 
 
 	err := r.DB.QueryRowx(query, userUUID, schoolUUID).Scan(
 		&user.UUID, &user.Username, &user.Email, &user.Status, &user.LastActive, &user.CreatedAt, &user.CreatedBy, &user.UpdatedAt, &user.UpdatedBy,
-		&details.SchoolUUID, &details.VehicleUUID, &details.Picture, &details.FirstName, &details.LastName,
+		&details.SchoolUUID, &vehicle.UUID, &details.Picture, &details.FirstName, &details.LastName,
 		&details.Gender, &details.Phone, &details.Address, &details.LicenseNumber,
-		&school.Name, &vehicle.VehicleNumber,
+		&school.Name, &vehicle.VehicleNumber, &vehicle.VehicleName,
 	)
 	if err != nil {
 		return user, school, vehicle, err
@@ -199,18 +205,29 @@ func (r *userRepository) FetchSpecDriverForPermittedSchool(userUUID, schoolUUID 
 }
 
 func (r *userRepository) CountAllPermittedDriver(schoolUUID string) (int, error) {
-	query := `SELECT COUNT(user_id) FROM users WHERE user_role = 'driver' AND deleted_at IS NULL`
-	if schoolUUID != "" {
-		query += ` AND user_uuid IN (SELECT user_uuid FROM driver_details WHERE school_uuid = $1)`
-	}
+    query := `SELECT COUNT(user_id) FROM users WHERE user_role = 'driver' AND deleted_at IS NULL`
 
-	var total int
-	err := r.DB.Get(&total, query, schoolUUID)
-	if err != nil {
-		return 0, err
-	}
+    if schoolUUID != "" {
+        query += ` AND user_uuid IN (SELECT user_uuid FROM driver_details WHERE school_uuid = $1)`
+    }
 
-	return total, nil
+    var total int
+
+    // Run query with parameter if schoolUUID is not empty
+    if schoolUUID != "" {
+        err := r.DB.Get(&total, query, schoolUUID)
+        if err != nil {
+            return 0, err
+        }
+    } else {
+		// If schoolUUID is empty, run query without parameter
+        err := r.DB.Get(&total, query)
+        if err != nil {
+            return 0, err
+        }
+    }
+
+    return total, nil
 }
 
 func (r *userRepository) FetchPermittedSchoolAccess(userUUID string) (string, error) {
@@ -726,20 +743,21 @@ func (r *userRepository) SaveUser(tx *sqlx.Tx, userEntity entity.User) (uuid.UUI
 	return userUUID, nil
 }
 
-func (r *userRepository) SaveSuperAdminDetails(tx *sqlx.Tx, details entity.SuperAdminDetails, userUUID uuid.UUID, params interface{}) error {
+func (r *userRepository) SaveSuperAdminDetails(tx *sqlx.Tx, details entity.SuperAdminDetails, userUUID uuid.UUID) error {
+	var params interface{}
 	details.UserUUID = userUUID
 	query := `
-        INSERT INTO super_admin_details 
-        (user_uuid, user_picture, user_first_name, user_last_name, user_gender, user_phone, user_address) 
-        VALUES (:user_uuid, :user_picture, :user_first_name, :user_last_name, :user_gender, :user_phone, :user_address)
-    `
+		INSERT INTO super_admin_details 
+		(user_uuid, user_picture, user_first_name, user_last_name, user_gender, user_phone, user_address) 
+		VALUES (:user_uuid, :user_picture, :user_first_name, :user_last_name, :user_gender, :user_phone, :user_address)
+	`
 	params = details
 	_, err := tx.NamedExec(query, params)
-
 	return err
 }
 
-func (r *userRepository) SaveSchoolAdminDetails(tx *sqlx.Tx, details entity.SchoolAdminDetails, userUUID uuid.UUID, params interface{}) error {
+func (r *userRepository) SaveSchoolAdminDetails(tx *sqlx.Tx, details entity.SchoolAdminDetails, userUUID uuid.UUID) error {
+	var params interface{}
 	details.UserUUID = userUUID
 	query := `
         INSERT INTO school_admin_details 
@@ -751,7 +769,8 @@ func (r *userRepository) SaveSchoolAdminDetails(tx *sqlx.Tx, details entity.Scho
 	return err
 }
 
-func (r *userRepository) SaveParentDetails(tx *sqlx.Tx, details entity.ParentDetails, userUUID uuid.UUID, params interface{}) error {
+func (r *userRepository) SaveParentDetails(tx *sqlx.Tx, details entity.ParentDetails, userUUID uuid.UUID) error {
+	var params interface{}
 	details.UserUUID = userUUID
 	query := `
         INSERT INTO parent_details 
@@ -763,7 +782,8 @@ func (r *userRepository) SaveParentDetails(tx *sqlx.Tx, details entity.ParentDet
 	return err
 }
 
-func (r *userRepository) SaveDriverDetails(tx *sqlx.Tx, details entity.DriverDetails, userUUID uuid.UUID, params interface{}) error {
+func (r *userRepository) SaveDriverDetails(tx *sqlx.Tx, details entity.DriverDetails, userUUID uuid.UUID) error {
+	var params interface{}
 	details.UserUUID = userUUID
 
 	if details.SchoolUUID == nil || *details.SchoolUUID == uuid.Nil {

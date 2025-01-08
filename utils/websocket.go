@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	// "time"
+
 	"shuttle/logger"
 	"shuttle/repositories"
 
@@ -27,65 +29,80 @@ func NewWebSocketService(userRepository repositories.UserRepositoryInterface, au
 	}
 }
 
+// Handle WebSocket connection
 var (
-	activeConnections = make(map[string]*websocket.Conn) // Save active WebSocket connections
-	mutex             = &sync.Mutex{}                    // Ensure atomic operations
+	shuttleGroups = make(map[string]map[string]*websocket.Conn) // Save active WebSocket connections
+	groupMutex    = &sync.Mutex{}                               // Ensure atomic operations
 )
 
-func AddConnection(ID string, conn *websocket.Conn) {
-	mutex.Lock()
-	defer mutex.Unlock()
-	activeConnections[ID] = conn
+func AddToShuttleGroup(shuttleUUID, userUUID string, conn *websocket.Conn) {
+	groupMutex.Lock()
+	defer groupMutex.Unlock()
+
+	if _, exists := shuttleGroups[shuttleUUID]; !exists {
+		shuttleGroups[shuttleUUID] = make(map[string]*websocket.Conn)
+	}
+	shuttleGroups[shuttleUUID][userUUID] = conn
 }
 
-func RemoveConnection(ID string) {
-	mutex.Lock()
-	defer mutex.Unlock()
-	delete(activeConnections, ID)
+func RemoveFromShuttleGroup(shuttleUUID, userUUID string) {
+	groupMutex.Lock()
+	defer groupMutex.Unlock()
+
+	if group, exists := shuttleGroups[shuttleUUID]; exists {
+		delete(group, userUUID)
+		if len(group) == 0 {
+			delete(shuttleGroups, shuttleUUID)
+		}
+	}
 }
 
-func GetConnection(ID string) (*websocket.Conn, bool) {
-	mutex.Lock()
-	defer mutex.Unlock()
-	conn, exists := activeConnections[ID]
-	return conn, exists
+func BroadcastToShuttleGroup(shuttleUUID string, message []byte) {
+	groupMutex.Lock()
+	defer groupMutex.Unlock()
+
+	if group, exists := shuttleGroups[shuttleUUID]; exists {
+		for _, conn := range group {
+			if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
+				logger.LogError(err, "WebSocket Broadcast Error", nil)
+			}
+		}
+	}
 }
 
-// Handle WebSocket connection
 func (s *WebSocketService) HandleWebSocketConnection(c *websocket.Conn) {
-	UUID := c.Params("id")
+	userUUID := c.Params("id")
+	shuttleUUID := c.Query("shuttle_uuid")
 
-	_, err := s.userRepository.FetchSpecificUser(UUID)
-	if err != nil {
-		logger.LogError(err, "Websocket Error Getting User", nil)
-		return
-	}
+	// Validate user access to shuttle group
+	// if !s.userRepository.HasAccessToShuttle(userUUID, shuttleUUID) {
+	// 	c.WriteMessage(websocket.TextMessage, []byte("Unauthorized access to shuttle group"))
+	// 	c.Close()
+	// 	return
+	// }
 
-	// Ensure only one connection per user
-	if existingConn, exists := GetConnection(UUID); exists {
-		logger.LogInfo("Websocket Connection Already Exists, Closing Existing Connection", map[string]interface{}{"ID": UUID})
-		existingConn.Close()
-	}
-
-	AddConnection(UUID, c)
-	logger.LogInfo("Websocket Connection Established", map[string]interface{}{"ID": UUID})
-
-	err = s.authRepository.UpdateUserStatus(UUID, "online", time.Time{})
+	err := s.authRepository.UpdateUserStatus(userUUID, "online", time.Time{})
 	if err != nil {
 		logger.LogError(err, "Websocket Error Updating User Status", nil)
 	}
+	
+	AddToShuttleGroup(shuttleUUID, userUUID, c)
+	defer func() {
+		RemoveFromShuttleGroup(shuttleUUID, userUUID)
+		logger.LogInfo("WebSocket Connection Removed from Group", map[string]interface{}{"ShuttleUUID": shuttleUUID, "UserUUID": userUUID})
+		err = s.authRepository.UpdateUserStatus(userUUID, "offline", time.Now())
+		if err != nil {
+			logger.LogError(err, "Websocket Error Updating User Status", nil)
+		}
+	}()
 
-	err = c.WriteMessage(websocket.TextMessage, []byte("Connected to websocket"))
-	if err != nil {
-		logger.LogError(err, "Websocket Error Writing Message", nil)
-		return
-	}
+	logger.LogInfo("WebSocket Connection Added to Group", map[string]interface{}{"ShuttleUUID": shuttleUUID, "UserUUID": userUUID})
+	c.WriteMessage(websocket.TextMessage, []byte("Connected to shuttle group"))
 
-	// Loop to read and write messages
 	for {
 		mt, msg, err := c.ReadMessage()
 		if err != nil {
-			logger.LogError(err, "Websocket Error Reading Message", nil)
+			logger.LogError(err, "WebSocket Error Reading Message", nil)
 			break
 		}
 
@@ -94,12 +111,28 @@ func (s *WebSocketService) HandleWebSocketConnection(c *websocket.Conn) {
 			Latitude  float64 `json:"latitude"`
 		}
 
-		if err := json.Unmarshal(msg, &data); err != nil {
-			logger.LogError(err, "Websocket Message Received Is Not A Location", nil)
-			break
+		if err := json.Unmarshal(msg, &data); err != nil || data.Longitude == 0 || data.Latitude == 0 {
+			errorResponse := struct {
+				Code    int    `json:"code"`
+				Status  string `json:"status"`
+				Message string `json:"message"`
+			}{
+				Code:    400,
+				Status:  "Bad Request",
+				Message: "Invalid message format. Must contain 'longitude' and 'latitude'.",
+			}
+			responseMsg, _ := json.Marshal(errorResponse)
+			c.WriteMessage(websocket.TextMessage, responseMsg)
+			continue
 		}
 
-		logger.LogInfo("Websocket Message Parsed", map[string]interface{}{"UUID": UUID, "longitude": data.Longitude, "latitude": data.Latitude})
+		logger.LogInfo("Broadcasting Message", map[string]interface{}{
+			"ShuttleUUID": shuttleUUID,
+			"UserUUID":    userUUID,
+			"Longitude":   data.Longitude,
+			"Latitude":    data.Latitude,
+		})
+		BroadcastToShuttleGroup(shuttleUUID, msg)
 
 		response := struct {
 			Code    int    `json:"code"`
@@ -108,28 +141,9 @@ func (s *WebSocketService) HandleWebSocketConnection(c *websocket.Conn) {
 		}{
 			Code:    200,
 			Status:  "OK",
-			Message: "Data received successfully",
+			Message: "Message broadcasted to shuttle group",
 		}
-
-		responseMsg, err := json.Marshal(response)
-		if err != nil {
-			logger.LogError(err, "Error marshaling response message", nil)
-			break
-		}
-
-		err = c.WriteMessage(mt, responseMsg)
-		if err != nil {
-			logger.LogError(err, "Websocket Error Writing Message", nil)
-			break
-		}
-	}
-
-	// Disconnect user
-	RemoveConnection(UUID)
-	logger.LogInfo("Websocket Connection Closed", map[string]interface{}{"ID": UUID})
-
-	err = s.authRepository.UpdateUserStatus(UUID, "offline", time.Now())
-	if err != nil {
-		logger.LogError(err, "Websocket Error Updating User Status", nil)
+		responseMsg, _ := json.Marshal(response)
+		c.WriteMessage(mt, responseMsg)
 	}
 }

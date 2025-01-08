@@ -148,6 +148,16 @@ func (handler *studentHandler) AddSchoolStudentWithParents(c *fiber.Ctx) error {
 		return utils.BadRequestResponse(c, err.Error(), nil)
 	}
 
+	if student.Student.StudentAddress == "" {
+		return utils.BadRequestResponse(c, "Address is required", nil)
+	}
+
+	if student.Student.StudentPickupPoint == nil || 
+		student.Student.StudentPickupPoint["latitude"] == 0 || 
+		student.Student.StudentPickupPoint["longitude"] == 0 {
+		return utils.BadRequestResponse(c, "Valid latitude and longitude are required for pickup point", nil)
+	}
+
 	if reflect.DeepEqual(dto.UserRequestsDTO{}, student.Parent) {
 		return utils.BadRequestResponse(c, "Parent details are required", nil)
 	}
@@ -178,7 +188,7 @@ func (handler *studentHandler) UpdateSchoolStudentWithParents(c *fiber.Ctx) erro
 
 	id := c.Params("id")
 
-	student := new(dto.SchoolStudentParentRequestDTO)
+	student := new(dto.StudentRequestDTO)
 	if err := c.BodyParser(student); err != nil {
 		return utils.BadRequestResponse(c, "Invalid request data", nil)
 	}
@@ -187,8 +197,9 @@ func (handler *studentHandler) UpdateSchoolStudentWithParents(c *fiber.Ctx) erro
 		return utils.BadRequestResponse(c, err.Error(), nil)
 	}
 
-	if reflect.DeepEqual(dto.UserRequestsDTO{}, student.Parent) {
-		return utils.BadRequestResponse(c, "Parent details are required", nil)
+	if student.StudentPickupPoint["latitude"] == 0 || student.StudentPickupPoint["longitude"] == 0 {
+		logger.LogError(nil, "Valid latitude and longitude are required for pickup point", nil)
+		return utils.BadRequestResponse(c, "Valid latitude and longitude are required for pickup point", nil)
 	}
 
 	if err := handler.studentService.UpdateSchoolStudentWithParents(id, *student, schoolUUIDStr, username); err != nil {

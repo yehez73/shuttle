@@ -18,5 +18,5 @@ CREATE TABLE driver_details (
 
 -- +goose Down
 -- +goose StatementBegin
-DROP TABLE IF EXISTS driver_details;
+DROP TABLE IF EXISTS driver_details CASCADE;
 -- +goose StatementEnd

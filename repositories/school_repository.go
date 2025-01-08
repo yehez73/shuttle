@@ -143,7 +143,7 @@ func (repositories *schoolRepository) FetchSpecSchool(id string) (entity.School,
 	var userUUIDs, adminSchoolUUIDs, firstNames, lastNames sql.NullString // Use sql.NullString for nullable fields
 
 	query := `
-		SELECT s.school_uuid, s.school_name, s.school_address, s.school_contact, s.school_email, s.school_description, s.created_at,
+		SELECT s.school_uuid, s.school_name, s.school_address, s.school_contact, s.school_email, s.school_description, s.school_point, s.created_at,
 			s.created_by, s.updated_at, s.updated_by, 
 			COALESCE(
 				STRING_AGG(
@@ -196,7 +196,7 @@ func (repositories *schoolRepository) FetchSpecSchool(id string) (entity.School,
 	`
 
 	err := repositories.DB.QueryRowx(query, id).Scan(
-		&school.UUID, &school.Name, &school.Address, &school.Contact, &school.Email, &school.Description, &school.CreatedAt,
+		&school.UUID, &school.Name, &school.Address, &school.Contact, &school.Email, &school.Description, &school.Point, &school.CreatedAt,
 		&school.CreatedBy, &school.UpdatedAt, &school.UpdatedBy, &userUUIDs, &adminSchoolUUIDs, &firstNames, &lastNames,
 	)
 	if err != nil {
@@ -226,9 +226,27 @@ func (repositories *schoolRepository) FetchSpecSchool(id string) (entity.School,
 }
 
 func (r *schoolRepository) SaveSchool(school entity.School) error {
-	query := `INSERT INTO schools (school_id, school_uuid, school_name, school_address, school_contact, school_email, school_description, created_by)
-			  VALUES (:school_id, :school_uuid, :school_name, :school_address, :school_contact, :school_email, :school_description, :created_by)`
-	_, err := r.DB.NamedExec(query, school)
+	var point interface{}
+	if school.Point.Valid {
+		point = school.Point.String
+	} else {
+		point = nil
+	}
+
+	query := `INSERT INTO schools (school_id, school_uuid, school_name, school_address, school_contact, school_email, school_description, school_point, created_by)
+			  VALUES (:school_id, :school_uuid, :school_name, :school_address, :school_contact, :school_email, :school_description, :school_point, :created_by)`
+	
+	_, err := r.DB.NamedExec(query, map[string]interface{}{
+		"school_id":        school.ID,
+		"school_uuid":      school.UUID,
+		"school_name":      school.Name,
+		"school_address":   school.Address,
+		"school_contact":   school.Contact,
+		"school_email":     school.Email,
+		"school_description": school.Description,
+		"school_point":     point,
+		"created_by":       school.CreatedBy,
+	})
 	if err != nil {
 		return err
 	}
@@ -238,7 +256,7 @@ func (r *schoolRepository) SaveSchool(school entity.School) error {
 
 func (r *schoolRepository) UpdateSchool(school entity.School) error {
 	query := `
-		UPDATE schools SET school_name = :school_name, school_address = :school_address, school_contact = :school_contact, school_email = :school_email, school_description = :school_description, updated_at = :updated_at, updated_by = :updated_by 
+		UPDATE schools SET school_name = :school_name, school_address = :school_address, school_contact = :school_contact, school_email = :school_email, school_description = :school_description, school_point = :school_point, updated_at = :updated_at, updated_by = :updated_by 
 		WHERE school_uuid = :school_uuid`
 	_, err := r.DB.NamedExec(query, school)
 	if err != nil {

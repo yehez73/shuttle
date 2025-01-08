@@ -87,6 +87,60 @@ func GenerateRefreshToken(userID, userUUID, username, role_code string) (string,
 	return encryptedRefreshToken, nil
 }
 
+// For reissuing refresh token
+func RegenerateRefreshToken(oldEncryptedToken string) (string, error) {
+	decryptedToken, err := decryptToken(oldEncryptedToken)
+	if err != nil {
+		return "", err
+	}
+
+	token, err := jwt.Parse(decryptedToken, func(token *jwt.Token) (interface{}, error) {
+		return jwtSecret, nil
+	})
+	if err != nil {
+		return "", errors.New("invalid refresh token")
+	}
+
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok || !token.Valid {
+		return "", errors.New("invalid claims")
+	}
+
+	// Validate absolute expiration
+	absoluteExp := int64(claims["absolute_exp"].(float64))
+	now := time.Now().Unix()
+	if absoluteExp <= now {
+		return "", errors.New("refresh token expired")
+	}
+
+	// Generate new refresh token with the same absolute_exp
+	userID := claims["sub"].(string)
+	userUUID := claims["user_uuid"].(string)
+	username := claims["user_name"].(string)
+	roleCode := claims["role_code"].(string)
+
+	newRefreshToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":          userID,
+		"user_uuid":    userUUID,
+		"user_name":    username,
+		"role_code":    roleCode,
+		"exp":          time.Now().Add(time.Hour * 24).Unix(), // Temporary validity 1 day
+		"absolute_exp": absoluteExp,                           // Keep original absolute expiry
+	})
+
+	signedToken, err := newRefreshToken.SignedString(jwtSecret)
+	if err != nil {
+		return "", err
+	}
+
+	newEncryptedToken, err := encryptToken(signedToken)
+	if err != nil {
+		return "", err
+	}
+
+	return newEncryptedToken, nil
+}
+
 // AES encryption for tokens
 func encryptToken(token string) (string, error) {
 	block, err := aes.NewCipher(encryptionKey)

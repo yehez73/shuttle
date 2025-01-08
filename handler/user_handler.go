@@ -311,7 +311,11 @@ func (handler *userHandler) GetAllPermittedDriver(c *fiber.Ctx) error {
 
 func (handler *userHandler) GetSpecPermittedDriver(c *fiber.Ctx) error {
 	id := c.Params("id")
-	role := c.Locals("role_code").(string)
+	role, ok := c.Locals("role_code").(string)
+	if !ok {
+		logger.LogError(nil, "Token does not contain role code", nil)
+		return utils.BadRequestResponse(c, "Token is invalid", nil)
+	}
 
 	var user dto.UserResponseDTO
 	var err error

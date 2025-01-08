@@ -89,14 +89,14 @@ func (handler *authHandler) Logout(c *fiber.Ctx) error {
 	}
 
 	// Delete WebSocket connection if exists
-	conn, exists := utils.GetConnection(userUUID)
-	if exists {
-		conn.Close()
-		utils.RemoveConnection(userUUID)
-		logger.LogInfo("WebSocket connection closed", map[string]interface{}{
-			"user_uuid": userUUID,
-		})
-	}
+	// conn, exists := utils.GetConnection(userUUID)
+	// if exists {
+	// 	conn.Close()
+	// 	utils.RemoveConnection(userUUID)
+	// 	logger.LogInfo("WebSocket connection closed", map[string]interface{}{
+	// 		"user_uuid": userUUID,
+	// 	})
+	// }
 
 	err := handler.authService.DeleteRefreshTokenOnLogout(c.Context(), userUUID)
 	if err != nil {
@@ -177,16 +177,24 @@ func (handler *authHandler) IssueNewAccessToken(c *fiber.Ctx) error {
 	username := claims["user_name"].(string)
 	roleCode := claims["role_code"].(string)
 
-	err = handler.authService.UpdateRefreshToken(userUUID, refreshToken)
+	newRefreshToken, err := utils.RegenerateRefreshToken(refreshToken)
+	if err != nil {
+		logger.LogError(err, "Failed to regenerate refresh token", map[string]interface{}{
+			"user_id": userID,
+		})
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	err = handler.authService.UpdateRefreshToken(userUUID, refreshToken, newRefreshToken)
 	if err != nil {
 		logger.LogError(err, "Failed to update refresh token", map[string]interface{}{
 			"user_uuid": userUUID,
 		})
-		return utils.UnauthorizedResponse(c, "Your session has expired or revoked, please login again", nil)
+		return utils.UnauthorizedResponse(c, "Something went wrong, please try again later", nil)
 	}
 
 	// Generate new access token
-	accessToken, err := utils.GenerateToken(userID, userUUID, username, roleCode)
+	newAccessToken, err := utils.GenerateToken(userID, userUUID, username, roleCode)
 	if err != nil {
 		logger.LogError(err, "Failed to generate access token", map[string]interface{}{
 			"user_id": userID,
@@ -195,6 +203,7 @@ func (handler *authHandler) IssueNewAccessToken(c *fiber.Ctx) error {
 	}
 
 	return utils.SuccessResponse(c, "Access token refreshed", map[string]interface{}{
-		"reissued_access_token": accessToken,
+		"reissued_access_token": newAccessToken,
+		"reiussed_refresh_token": newRefreshToken,
 	})
 }

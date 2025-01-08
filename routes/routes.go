@@ -19,6 +19,8 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	vehicleRepository := repositories.NewVehicleRepository(db)
 	studentRepository := repositories.NewStudentRepository(db)
 	routeRepository := repositories.NewRouteRepository(db)
+	childernRepository := repositories.NewChildernRepository(db)
+	shuttleRepository := repositories.NewShuttleRepository(db)
 	
 	userService := services.NewUserService(userRepository)
 	authService := services.NewAuthService(authRepository, userRepository)
@@ -26,6 +28,8 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	vehicleService := services.NewVehicleService(vehicleRepository)
 	studentService := services.NewStudentService(studentRepository, &userService, userRepository)
 	routeService := services.NewRouteService(routeRepository)
+	childernService := services.NewChildernService(childernRepository)
+	shuttleService := services.NewShuttleService(shuttleRepository)
 	
 	authHandler := handler.NewAuthHttpHandler(authService)
 	userHandler := handler.NewUserHttpHandler(userService, schoolService, vehicleService)
@@ -33,6 +37,8 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	vehicleHandler := handler.NewVehicleHttpHandler(vehicleService)
 	studentHandler := handler.NewStudentHttpHandler(studentService)
 	routeHandler := handler.NewRouteHttpHandler(routeService)
+	childernHandler := handler.NewChildernHandler(childernService)
+	shuttleHandler := handler.NewShuttleHandler(shuttleService)
 
 	wsService := utils.NewWebSocketService(userRepository, authRepository)
 	
@@ -63,6 +69,11 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	
 	protectedSuperAdmin := protected.Group("/superadmin")
 	protectedSuperAdmin.Use(middleware.AuthorizationMiddleware([]string{"SA"}))
+	protectedDriver := protected.Group("/driver")
+	protectedDriver.Use(middleware.AuthorizationMiddleware([]string{"D"}))
+	
+	protectedParent := protected.Group("/parent")
+	protectedParent.Use(middleware.AuthorizationMiddleware([]string{"P"}))
 
 	// USER FOR SUPERADMIN
 	protectedSuperAdmin.Get("/user/sa/all", userHandler.GetAllSuperAdmin)
@@ -110,7 +121,33 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	protectedSchoolAdmin.Post("/user/driver/add", userHandler.AddSchoolDriver)
 	protectedSchoolAdmin.Put("/user/driver/update/:id", userHandler.UpdateSchoolDriver)
 	protectedSchoolAdmin.Delete("/user/driver/delete/:id", userHandler.DeleteSchoolDriver)
+	
+	protectedSchoolAdmin.Get("/vehicle/all", vehicleHandler.GetAllVehiclesForPermittedSchool)
+	protectedSchoolAdmin.Get("/vehicle/:id", vehicleHandler.GetSpecVehicleForPermittedSchool)
+	protectedSchoolAdmin.Post("/vehicle/add", vehicleHandler.AddVehicleWithDriverForPermittedSchool)
+	protectedSchoolAdmin.Put("/vehicle/update/:id", vehicleHandler.UpdateVehicle)
+	protectedSchoolAdmin.Delete("/vehicle/delete/:id", vehicleHandler.DeleteVehicle)
 
 	// ROUTE FOR SCHOOL ADMIN
-	protectedSchoolAdmin.Get("/route/add", routeHandler.AddRoute)
+	protectedSchoolAdmin.Get("/routes/all", routeHandler.GetAllRoutesByAS)
+	protectedSchoolAdmin.Get("/route/:id", routeHandler.GetSpecRouteByAS)
+	protectedSchoolAdmin.Post("/route/add", routeHandler.AddRoute)
+	protectedSchoolAdmin.Put("/route/update/:id", routeHandler.UpdateRoute)
+	protectedSchoolAdmin.Delete("/route/delete/:id", routeHandler.DeleteRoute)
+
+	//ROUTE FOR DRIVER
+	protectedDriver.Get("/route/all", routeHandler.GetAllRoutesByDriver)
+	protectedDriver.Get("/route/:id", routeHandler.GetSpecRouteByDriver)
+
+	protectedParent.Get("/my/childern/track", shuttleHandler.GetShuttleTrackByParent) //buat menu track
+	protectedParent.Get("/my/childern/all", childernHandler.GetAllChilderns) //buat menu apalah
+	protectedParent.Get("/my/childern/shuttle/:id", shuttleHandler.GetSpecShuttle) //buat menu opo jeneng e lali😂 (spec shutle)
+	protectedParent.Get("/my/childern/recap", shuttleHandler.GetAllShuttleByParent) //buat menu recap
+	protectedParent.Get("/my/childern/:id", childernHandler.GetSpecChildern) //nih katanya butuh spec
+	protectedParent.Put("/my/childern/update/:id", childernHandler.UpdateChildern) //menu update nih tampling
+
+	protectedDriver.Get("/shuttle/all", shuttleHandler.GetAllShuttleByDriver)
+	protectedDriver.Post("/shuttle/add", shuttleHandler.AddShuttle)
+	protectedDriver.Get("/shuttle/:id", shuttleHandler.GetSpecShuttle)
+	protectedDriver.Put("/shuttle/update/:id", shuttleHandler.EditShuttle) 
 }

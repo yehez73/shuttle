@@ -776,7 +776,7 @@ func (s *UserService) saveRoleDetails(tx *sqlx.Tx, userUUID uuid.UUID, req dto.U
 			Phone:     req.Phone,
 			Address:   req.Address,
 		}
-		return s.userRepository.SaveSuperAdminDetails(tx, details, userUUID, nil)
+		return s.userRepository.SaveSuperAdminDetails(tx, details, userUUID)
 
 	case entity.SchoolAdmin:
 		parsedDetails, err := parseDetails[dto.SchoolAdminDetailsRequestsDTO](req.Details)
@@ -792,7 +792,7 @@ func (s *UserService) saveRoleDetails(tx *sqlx.Tx, userUUID uuid.UUID, req dto.U
 			Phone:      req.Phone,
 			Address:    req.Address,
 		}
-		return s.userRepository.SaveSchoolAdminDetails(tx, schoolDetails, userUUID, nil)
+		return s.userRepository.SaveSchoolAdminDetails(tx, schoolDetails, userUUID)
 
 	case entity.Parent:
 		details := entity.ParentDetails{
@@ -802,7 +802,7 @@ func (s *UserService) saveRoleDetails(tx *sqlx.Tx, userUUID uuid.UUID, req dto.U
 			Phone:     req.Phone,
 			Address:   req.Address,
 		}
-		return s.userRepository.SaveParentDetails(tx, details, userUUID, nil)
+		return s.userRepository.SaveParentDetails(tx, details, userUUID)
 
 	case entity.Driver:
 		parsedDetails, err := parseDetails[dto.DriverDetailsRequestsDTO](req.Details)
@@ -823,7 +823,7 @@ func (s *UserService) saveRoleDetails(tx *sqlx.Tx, userUUID uuid.UUID, req dto.U
 			Address:       req.Address,
 			LicenseNumber: parsedDetails.LicenseNumber,
 		}
-		return s.userRepository.SaveDriverDetails(tx, driverDetails, userUUID, nil)
+		return s.userRepository.SaveDriverDetails(tx, driverDetails, userUUID)
 
 	default:
 		return errors.New("invalid role", 400)

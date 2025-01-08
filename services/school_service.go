@@ -2,6 +2,7 @@ package services
 
 import (
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -103,6 +104,11 @@ func (service *SchoolService) GetSpecSchool(id string) (dto.SchoolResponseDTO, e
 	adminUUIDsStr := strings.Join(adminUUIDs, ", ")
 	adminNamesStr := strings.Join(adminNames, ", ")
 
+	var pointStr string
+	if school.Point.Valid {
+		pointStr = school.Point.String
+	}
+
 	schoolDTO := dto.SchoolResponseDTO{
 		UUID:        school.UUID.String(),
 		Name:        school.Name,
@@ -112,6 +118,7 @@ func (service *SchoolService) GetSpecSchool(id string) (dto.SchoolResponseDTO, e
 		Contact:     school.Contact,
 		Email:       school.Email,
 		Description: school.Description,
+		Point:       pointStr,
 		CreatedAt:   safeTimeFormat(school.CreatedAt),
 		CreatedBy:   safeStringFormat(school.CreatedBy),
 		UpdatedAt:   safeTimeFormat(school.UpdatedAt),
@@ -122,6 +129,18 @@ func (service *SchoolService) GetSpecSchool(id string) (dto.SchoolResponseDTO, e
 }
 
 func (service *SchoolService) AddSchool(req dto.SchoolRequestDTO, username string) error {
+	// Convert map to JSON string (handling empty Point)
+	var pointJSON string
+	if len(req.Point) > 0 {
+		pointData, err := json.Marshal(req.Point)
+		if err != nil {
+			return err
+		}
+		pointJSON = string(pointData)
+	} else {
+		pointJSON = "{}"
+	}
+
 	school := entity.School{
 		ID:          time.Now().UnixMilli()*1e6 + int64(uuid.New().ID()%1e6),
 		UUID:        uuid.New(),
@@ -130,6 +149,9 @@ func (service *SchoolService) AddSchool(req dto.SchoolRequestDTO, username strin
 		Contact:     req.Contact,
 		Email:       req.Email,
 		Description: req.Description,
+		Point:       sql.NullString{String: pointJSON, Valid: true}, // Save the Point as a non-null value (if empty, use "{}" or other default value)
+		CreatedAt:   sql.NullTime{Time: time.Now(), Valid: true},
+		UpdatedAt:   sql.NullTime{Time: time.Now(), Valid: true},
 		CreatedBy:   toNullString(username),
 	}
 
@@ -146,6 +168,11 @@ func (service *SchoolService) UpdateSchool(id string, req dto.SchoolRequestDTO, 
 		return err
 	}
 
+	pointJSON, err := json.Marshal(req.Point)
+	if err != nil {
+		return err
+	}
+
 	school := entity.School{
 		UUID:        parsedUUID,
 		Name:        req.Name,
@@ -153,6 +180,7 @@ func (service *SchoolService) UpdateSchool(id string, req dto.SchoolRequestDTO, 
 		Contact:     req.Contact,
 		Email:       req.Email,
 		Description: req.Description,
+		Point:       sql.NullString{String: string(pointJSON), Valid: true},
 		UpdatedAt:   toNullTime(time.Now()),
 		UpdatedBy:   toNullString(username),
 	}

@@ -12,6 +12,11 @@ type VehicleRequestDTO struct {
 	School string `json:"school_uuid"`
 }
 
+type VehicleDriverRequestDTO struct {
+	Vehicle VehicleRequestDTO `json:"vehicle"`
+	Driver  UserRequestsDTO   `json:"driver"`
+}
+
 type VehicleResponseDTO struct {
 	UUID       string `json:"vehicle_uuid"`
 	SchoolUUID string `json:"school_uuid,omitempty"`
