@@ -16,6 +16,7 @@ type ChildernHandlerInterface interface {
 	GetAllChilderns(c *fiber.Ctx) error
 	GetSpecChildern(c *fiber.Ctx) error
 	UpdateChildern(c *fiber.Ctx) error
+	UpdateChildernStatus(c *fiber.Ctx) error
 }
 
 type ChildernHandler struct {
@@ -117,6 +118,52 @@ func (handler *ChildernHandler) UpdateChildern(c *fiber.Ctx) error {
 	return c.Status(http.StatusOK).JSON(fiber.Map{
 		"code":    http.StatusOK,
 		"message": "Student updated successfully",
+		"status":  true,
+	})
+}
+
+func (handler *ChildernHandler) UpdateChildernStatus(c *fiber.Ctx) error {
+	id := c.Params("id")
+	if id == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"code":    fiber.StatusBadRequest,
+			"message": "Student ID is required",
+			"status":  false,
+		})
+	}
+	username, ok := c.Locals("user_name").(string)
+	if !ok || username == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"code":    fiber.StatusUnauthorized,
+			"message": "Unauthorized",
+			"status":  false,
+		})
+	}
+	var studentReqDTO dto.StudentStatusRequestByParentDTO
+	if err := c.BodyParser(&studentReqDTO); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"code":    fiber.StatusBadRequest,
+			"message": "Invalid request data",
+			"status":  false,
+		})
+	}
+	if err := utils.ValidateStruct(c, studentReqDTO); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"code":    fiber.StatusBadRequest,
+			"message": "Validation error: " + err.Error(),
+			"status":  false,
+		})
+	}
+	if err := handler.ChildernService.UpdateChildernStatus(id, studentReqDTO, username); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"code":    fiber.StatusInternalServerError,
+			"message": "Failed to update student status: " + err.Error(),
+			"status":  false,
+		})
+	}
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"code":    fiber.StatusOK,
+		"message": "Student status updated successfully",
 		"status":  true,
 	})
 }

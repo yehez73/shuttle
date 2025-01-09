@@ -14,5 +14,5 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 
 -- +goose Down
 -- +goose StatementBegin
-DROP TABLE IF EXISTS refresh_tokens;
+DROP TABLE IF EXISTS refresh_tokens CASCADE;
 -- +goose StatementEnd

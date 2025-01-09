@@ -9,7 +9,9 @@ import (
 	"shuttle/errors"
 	"shuttle/logger"
 	"shuttle/models/dto"
+	"shuttle/models/entity"
 	"shuttle/repositories"
+	// "shuttle/utils"
 
 	"github.com/google/uuid"
 	"github.com/spf13/viper"
@@ -23,6 +25,8 @@ type AuthServiceInterface interface {
 	DeleteRefreshTokenOnLogout(ctx context.Context, userID string) error
 	UpdateUserStatus(userUUID, status string, lastActive time.Time) error
 	UpdateRefreshToken(userUUID, refreshToken, newRefreshToken string) error
+	// GenerateFCMToken(userUUID, token string) (string, error)
+	AddDeviceToken(userUUID, fcmToken string) error
 }
 
 type AuthService struct {
@@ -244,6 +248,38 @@ func (service *AuthService) UpdateRefreshToken(userUUID, refreshToken, newRefres
 	}
 
 	err = service.authRepository.UpdateRefreshToken(userUUID, newRefreshToken)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// func (service *AuthService) GenerateFCMToken() (string, error) {
+// 	tp, err := utils.NewTokenProvider()
+// 	if err != nil {
+// 		logger.LogError(err, "Failed to get token provider", nil)
+// 		return "", err
+// 	}
+
+// 	token, err := tp.Token()
+// 	if err != nil {
+// 		logger.LogError(err, "Failed to get token", nil)
+// 		return "", err
+// 	}
+
+// 	return token, nil
+// }
+
+func (service *AuthService) AddDeviceToken(userUUID, fcmToken string) error {
+	FCMTokenData := entity.FCMToken{
+		ID:          time.Now().UnixMilli()*1e6 + int64(uuid.New().ID()%1e6),
+		UserUUID:    uuid.MustParse(userUUID),
+		DeviceToken: fcmToken,
+		CreatedAt:   time.Now(),
+	}
+
+	err := service.authRepository.SaveDeviceToken(FCMTokenData)
 	if err != nil {
 		return err
 	}

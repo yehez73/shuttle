@@ -61,7 +61,7 @@ func main() {
 	user := User{
 		ID:       0,
 		UUID:     "00000000-0000-0000-0000-000000000000",
-		Username: "",
+		Username: " ",
 		Email:    "faker@gmail.com",
 		Password: hashedPassword,
 		Role:     SuperAdmin,

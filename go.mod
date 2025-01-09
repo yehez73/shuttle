@@ -106,6 +106,7 @@ require (
 )
 
 require (
+	firebase.google.com/go v3.13.0+incompatible
 	firebase.google.com/go/v4 v4.15.1
 	github.com/andybalholm/brotli v1.1.1 // indirect
 	github.com/disintegration/imaging v1.6.2

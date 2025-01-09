@@ -3,18 +3,17 @@ package repositories
 import (
 	"database/sql"
 	"fmt"
-	"time"
-	"shuttle/models/dto"
-	"shuttle/models/entity"
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"shuttle/models/dto"
+	"shuttle/models/entity"
+	"time"
 )
 
 type RouteRepositoryInterface interface {
 	FetchAllRoutesByAS(schoolUUID string) ([]dto.RoutesResponseDTO, error)
 	FetchSpecRouteByAS(route_name_UUID, driverUUID string) ([]entity.RouteAssignment, error)
 	FetchAllRoutesByDriver(driverUUID string) ([]dto.RouteResponseByDriverDTO, error)
-	FetchSpecRouteByDriver(driverUUID, studentUUID string) (*dto.RouteResponseByDriverDTO, error)
 	AddRoutes(tx *sql.Tx, route entity.Routes) (string, error)
 	AddRouteAssignment(tx *sql.Tx, assignment entity.RouteAssignment) error
 	IsStudentAssigned(tx *sql.Tx, studentUUID string) (bool, error)
@@ -126,7 +125,8 @@ func (r *routeRepository) FetchSpecRouteByAS(routeNameUUID, driverUUID string) (
             s.student_uuid,
             COALESCE(s.student_first_name, '') AS student_first_name,
             COALESCE(s.student_last_name, '') AS student_last_name,
-            COALESCE(ra.student_order, 0) AS student_order
+			s.student_status
+            COALESCE(ra.student_order, 0) AS student_order,
         FROM routes r
         LEFT JOIN route_assignment ra ON r.route_name_uuid = ra.route_name_uuid
         LEFT JOIN driver_details d ON ra.driver_uuid = d.user_uuid
@@ -155,6 +155,7 @@ func (r *routeRepository) FetchSpecRouteByAS(routeNameUUID, driverUUID string) (
 			&route.StudentUUID,
 			&route.StudentFirstName,
 			&route.StudentLastName,
+			&route.StudentStatus,
 			&route.StudentOrder,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan route data: %w", err)
@@ -175,6 +176,7 @@ func (repo *routeRepository) FetchAllRoutesByDriver(driverUUID string) ([]dto.Ro
 			r.school_uuid,
 			s.student_first_name,
 			s.student_last_name,
+			s.student_status,
 			s.student_address,
 			s.student_pickup_point,
 			st.shuttle_uuid,
@@ -185,7 +187,7 @@ func (repo *routeRepository) FetchAllRoutesByDriver(driverUUID string) ([]dto.Ro
 		LEFT JOIN students s ON r.student_uuid = s.student_uuid
 		LEFT JOIN schools sc ON r.school_uuid = sc.school_uuid
 		LEFT JOIN shuttle st ON r.student_uuid = st.student_uuid AND DATE(st.created_at) = CURRENT_DATE
-		WHERE r.driver_uuid = $1
+		WHERE r.driver_uuid = $1 AND s.student_status = 'present'
 		ORDER BY r.created_at ASC
 	`
 	var routes []dto.RouteResponseByDriverDTO
@@ -194,32 +196,6 @@ func (repo *routeRepository) FetchAllRoutesByDriver(driverUUID string) ([]dto.Ro
 		return nil, err
 	}
 	return routes, nil
-}
-
-func (repo *routeRepository) FetchSpecRouteByDriver(driverUUID, studentUUID string) (*dto.RouteResponseByDriverDTO, error) {
-	query := `
-		SELECT
-			r.route_uuid,
-			r.student_uuid,
-			r.driver_uuid,
-			r.school_uuid,
-			s.student_first_name,
-			s.student_last_name,
-			s.student_address,
-			s.student_pickup_point,
-			sc.school_name,
-			sc.school_point
-		FROM route_assignment r
-		LEFT JOIN students s ON r.student_uuid = s.student_uuid
-		LEFT JOIN schools sc ON r.school_uuid = sc.school_uuid
-		WHERE r.driver_uuid = $1 AND r.student_uuid = $2
-	`
-	var route dto.RouteResponseByDriverDTO
-	err := repo.DB.Get(&route, query, driverUUID, studentUUID)
-	if err != nil {
-		return nil, err
-	}
-	return &route, nil
 }
 
 func (r *routeRepository) ValidateDriverVehicle(driverUUID string) (bool, error) {

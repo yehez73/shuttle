@@ -31,7 +31,7 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	childernService := services.NewChildernService(childernRepository)
 	shuttleService := services.NewShuttleService(shuttleRepository)
 	
-	authHandler := handler.NewAuthHttpHandler(authService)
+	authHandler := handler.NewAuthHttpHandler(authService, userService)
 	userHandler := handler.NewUserHttpHandler(userService, schoolService, vehicleService)
 	schoolHandler := handler.NewSchoolHttpHandler(schoolService)
 	vehicleHandler := handler.NewVehicleHttpHandler(vehicleService)
@@ -63,7 +63,10 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	protected.Use(middleware.AuthorizationMiddleware([]string{"SA", "AS", "D", "P"}))
 
 	protected.Get("/my/profile", authHandler.GetMyProfile)
+	protected.Put("/my/profile/update", authHandler.UpdateMyProfile)
+
 	protected.Post("/logout", authHandler.Logout)
+	protected.Post("/device-token", authHandler.AddDeviceToken)
 
 	////////////////////////////////////// SUPER ADMIN //////////////////////////////////////
 	
@@ -137,7 +140,6 @@ func Route(r *fiber.App, db *sqlx.DB) {
 
 	//ROUTE FOR DRIVER
 	protectedDriver.Get("/route/all", routeHandler.GetAllRoutesByDriver)
-	protectedDriver.Get("/route/:id", routeHandler.GetSpecRouteByDriver)
 
 	protectedParent.Get("/my/childern/track", shuttleHandler.GetShuttleTrackByParent) //buat menu track
 	protectedParent.Get("/my/childern/all", childernHandler.GetAllChilderns) //buat menu apalah
@@ -145,6 +147,7 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	protectedParent.Get("/my/childern/recap", shuttleHandler.GetAllShuttleByParent) //buat menu recap
 	protectedParent.Get("/my/childern/:id", childernHandler.GetSpecChildern) //nih katanya butuh spec
 	protectedParent.Put("/my/childern/update/:id", childernHandler.UpdateChildern) //menu update nih tampling
+	protectedParent.Put("/my/childern/status/update/:id", childernHandler.UpdateChildernStatus) //menu update nih tampling
 
 	protectedDriver.Get("/shuttle/all", shuttleHandler.GetAllShuttleByDriver)
 	protectedDriver.Post("/shuttle/add", shuttleHandler.AddShuttle)

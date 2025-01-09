@@ -1,10 +1,12 @@
 package main
 
 import (
+	"log"
+	"runtime/debug"
 	"shuttle/databases"
 	zerolog "shuttle/logger"
 	"shuttle/routes"
-	_ "shuttle/utils"
+	"shuttle/utils"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -13,7 +15,7 @@ import (
 )
 
 func main() {
-	// utils.InitFirebase()
+	utils.InitFirebase()
 	zerolog.InitLogger()
 
 	app := fiber.New()
@@ -23,6 +25,18 @@ func main() {
 	app.Use(logger.New(logger.Config{
 		Format: "[${time}] ${method} ${path} [${status}] ${latency}\n",
 	}))
+
+	app.Use(func(c *fiber.Ctx) error {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Recovered from panic: %v\n%s", r, debug.Stack())
+				log.Printf("Request URL: %s\n", c.OriginalURL())
+				c.Status(fiber.StatusInternalServerError).SendString("Internal Server Error, please try again later")
+				zerolog.LogInfo("System still continue to run", nil)
+			}
+		}()
+		return c.Next()
+	})
 
 	db, err := databases.PostgresConnection()
 	if err != nil {

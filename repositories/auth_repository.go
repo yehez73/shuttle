@@ -14,6 +14,7 @@ type AuthRepositoryInterface interface {
 	DeleteRefreshToken(ctx context.Context, userUUID string) error
 	UpdateUserStatus(userUUID, status string, lastActive time.Time) error
 	UpdateRefreshToken(userUUID, newRefreshToken string) error
+	SaveDeviceToken(tokenData entity.FCMToken) error
 }
 
 type authRepository struct {
@@ -111,6 +112,21 @@ func (r *authRepository) UpdateRefreshToken(userUUID, newRefreshToken string) er
 		WHERE user_uuid = $1
 	`
 	_, err := r.DB.Exec(queryUpdate, userUUID, newRefreshToken)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (r *authRepository) SaveDeviceToken(tokendata entity.FCMToken) error {
+	query := `
+		INSERT INTO fcm_tokens (id, user_uuid, device_token, created_at)
+		VALUES ($1, $2, $3, NOW())
+		ON CONFLICT (user_uuid)
+		DO UPDATE SET device_token = $2, updated_at = NOW()
+	`
+	_, err := r.DB.Exec(query, tokendata.ID, tokendata.UserUUID, tokendata.DeviceToken)
 	if err != nil {
 		return err
 	}

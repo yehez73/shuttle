@@ -15,16 +15,20 @@ type AuthHandlerInterface interface {
 	Login(c *fiber.Ctx) error
 	Logout(c *fiber.Ctx) error
 	GetMyProfile(c *fiber.Ctx) error
+	UpdateMyProfile(c *fiber.Ctx) error
 	IssueNewAccessToken(c *fiber.Ctx) error
+	AddDeviceToken(c *fiber.Ctx) error
 }
 
 type authHandler struct {
 	authService services.AuthService
+	userService services.UserService
 }
 
-func NewAuthHttpHandler(authService services.AuthService) AuthHandlerInterface {
+func NewAuthHttpHandler(authService services.AuthService, userService services.UserService) AuthHandlerInterface {
 	return &authHandler{
 		authService: authService,
+		userService: userService,
 	}
 }
 
@@ -141,6 +145,43 @@ func (handler *authHandler) GetMyProfile(c *fiber.Ctx) error {
 	return utils.SuccessResponse(c, "User profile retrieved", user)
 }
 
+func (handler *authHandler) UpdateMyProfile(c *fiber.Ctx) error {
+	userUUID, ok := c.Locals("userUUID").(string)
+	if !ok {
+		return utils.UnauthorizedResponse(c, "Token is invalid", nil)
+	}
+
+	username, ok := c.Locals("user_name").(string)
+	if !ok {
+		return utils.UnauthorizedResponse(c, "Token is invalid", nil)
+	}
+
+	updateRequest := new(dto.UserRequestsDTO)
+	if err := c.BodyParser(updateRequest); err != nil {
+		return utils.BadRequestResponse(c, "Invalid request data", nil)
+	}
+
+	existingUser, err := handler.userService.GetSpecUserWithDetails(userUUID)
+	if err != nil {
+		logger.LogError(err, "Failed to fetch user", nil)
+		return utils.NotFoundResponse(c, "User not found", nil)
+	}
+
+	updateRequest.Password = existingUser.User.Password
+	updateRequest.Role = dto.Role(existingUser.User.Role)
+	updateRequest.RoleCode = existingUser.User.RoleCode
+
+	err = handler.userService.UpdateUser(userUUID, *updateRequest, username, nil)
+	if err != nil {
+		logger.LogError(err, "Failed to update user profile", map[string]interface{}{
+			"user_uuid": userUUID,
+		})
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	return utils.SuccessResponse(c, "User profile updated", nil)
+}
+
 // Reissue a new access token
 func (handler *authHandler) IssueNewAccessToken(c *fiber.Ctx) error {
 	refreshToken := c.Get("Authorization")
@@ -203,7 +244,41 @@ func (handler *authHandler) IssueNewAccessToken(c *fiber.Ctx) error {
 	}
 
 	return utils.SuccessResponse(c, "Access token refreshed", map[string]interface{}{
-		"reissued_access_token": newAccessToken,
+		"reissued_access_token":  newAccessToken,
 		"reiussed_refresh_token": newRefreshToken,
 	})
+}
+
+func (handler *authHandler) AddDeviceToken(c *fiber.Ctx) error {
+	userUUID, ok := c.Locals("userUUID").(string)
+	if !ok {
+		return utils.UnauthorizedResponse(c, "Token is invalid", nil)
+	}
+
+	tokenRequest := new(dto.DeviceTokenRequest)
+	if err := c.BodyParser(tokenRequest); err != nil {
+		return utils.BadRequestResponse(c, "Invalid request data", nil)
+	}
+
+	// Generate FCM Token di backend menggunakan Firebase Admin SDK
+	// fcmToken, err := handler.authService.GenerateFCMToken()
+	// if err != nil {
+	// 	return utils.InternalServerErrorResponse(c, "Failed to generate FCM token", nil)
+	// }
+
+	deviceToken := tokenRequest.Token
+
+	// Simpan FCM Token di database
+	err := handler.authService.AddDeviceToken(userUUID, deviceToken)
+	if err != nil {
+		logger.LogError(err, "Failed to save FCM token", map[string]interface{}{
+			"user_uuid":    userUUID,
+			"device_token": tokenRequest.Token,
+		})
+		return utils.InternalServerErrorResponse(c, "Failed to save FCM token", nil)
+	}
+
+	// Return the generated token as part of the response
+
+	return utils.SuccessResponse(c, "Device token added successfully", nil)
 }

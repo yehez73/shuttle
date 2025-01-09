@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"shuttle/logger"
 	"shuttle/models/dto"
 	"shuttle/services"
 	"shuttle/utils"
@@ -197,6 +198,25 @@ func (h *ShuttleHandler) EditShuttle(c *fiber.Ctx) error {
 			return utils.NotFoundResponse(c, "Shuttle not found", nil)
 		}
 		return utils.InternalServerErrorResponse(c, "Failed to edit shuttle", nil)
+	}
+
+	shuttle, err := h.ShuttleService.GetSpecShuttle(uuid.MustParse(id))
+	if err != nil {
+		return utils.InternalServerErrorResponse(c, "Internal server error, please try again later", nil)
+	}
+
+	parentUUID := shuttle[0].ParentUUID
+	shuttleStatus := shuttle[0].ShuttleStatus
+	
+	// Send notification to parent
+	err = utils.SendNotification(parentUUID, "Shuttle Status Update", shuttleStatus)
+	if err != nil {
+		logger.LogWarn("Failed to send notification to parent", map[string]interface{}{
+			"error": err.Error(),
+			"shuttleUUID": id,
+			"parentUUID": parentUUID,
+			"shuttleStatus": shuttleStatus,
+		})
 	}
 
 	return utils.SuccessResponse(c, "Shuttle status updated successfully", nil)

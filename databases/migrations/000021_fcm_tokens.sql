@@ -2,7 +2,7 @@
 -- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS fcm_tokens (
     id BIGINT PRIMARY KEY,
-    user_uuid UUID NOT NULL,
+    user_uuid UUID UNIQUE NOT NULL,
     device_token TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NULL DEFAULT NULL,
@@ -12,5 +12,5 @@ CREATE TABLE IF NOT EXISTS fcm_tokens (
 
 -- +goose Down
 -- +goose StatementBegin
-DROP TABLE IF EXISTS fcm_tokens;
+DROP TABLE IF EXISTS fcm_tokens CASCADE;
 -- +goose StatementEnd

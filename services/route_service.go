@@ -3,22 +3,21 @@ package services
 import (
 	"database/sql"
 	"fmt"
+	"github.com/google/uuid"
 	"shuttle/models/dto"
 	"shuttle/models/entity"
 	"shuttle/repositories"
 	"time"
-	"github.com/google/uuid"
 )
 
 type RouteServiceInterface interface {
 	GetAllRoutesByAS(schoolUUID string) ([]dto.RoutesResponseDTO, error)
 	GetSpecRouteByAS(routeNameUUID, driverUUID string) (dto.RoutesResponseDTO, error)
 	GetAllRoutesByDriver(driverUUID string) ([]dto.RouteResponseByDriverDTO, error)
-	GetSpecRouteByDriver(driverUUID, studentUUID string) (*dto.RouteResponseByDriverDTO, error)
 	AddRoute(route dto.RoutesRequestDTO, schoolUUID, username string) error
 	GetSchoolUUIDByUserUUID(userUUID string) (string, error)
 	GetDriverUUIDByRouteName(routeNameUUID string) (string, error)
-	UpdateRoute(route dto.RoutesRequestDTO, routenameUUID, schoolUUID, username string) error 
+	UpdateRoute(route dto.RoutesRequestDTO, routenameUUID, schoolUUID, username string) error
 	DeleteRoute(routenameUUID, schoolUUID, username string) error
 }
 
@@ -77,6 +76,7 @@ func (s *routeService) GetSpecRouteByAS(routeNameUUID, driverUUID string) (dto.R
 			StudentUUID:      route.StudentUUID.String(),
 			StudentFirstName: defaultString(route.StudentFirstName),
 			StudentLastName:  defaultString(route.StudentLastName),
+			StudentStatus:    route.StudentStatus,
 			StudentOrder:     route.StudentOrder,
 		}
 		driverInfo.Students = append(driverInfo.Students, student)
@@ -101,14 +101,6 @@ func (service *routeService) GetAllRoutesByDriver(driverUUID string) ([]dto.Rout
 	return routes, nil
 }
 
-func (service *routeService) GetSpecRouteByDriver(driverUUID, studentUUID string) (*dto.RouteResponseByDriverDTO, error) {
-	route, err := service.routeRepository.FetchSpecRouteByDriver(driverUUID, studentUUID)
-	if err != nil {
-		return nil, err
-	}
-	return route, nil
-}
-
 func (service *routeService) AddRoute(route dto.RoutesRequestDTO, schoolUUID, username string) error {
 	routeEntity := entity.Routes{
 		RouteID:          time.Now().UnixMilli()*1e6 + int64(uuid.New().ID()%1e6),
@@ -120,26 +112,26 @@ func (service *routeService) AddRoute(route dto.RoutesRequestDTO, schoolUUID, us
 		CreatedBy:        sql.NullString{String: username, Valid: true},
 	}
 
-tx, err := service.routeRepository.BeginTransaction()
+	tx, err := service.routeRepository.BeginTransaction()
 	if err != nil {
 		return fmt.Errorf("failed to start transaction: %w", err)
 	}
-defer func() {
+	defer func() {
 		if r := recover(); r != nil {
 			tx.Rollback()
 			panic(r)
 		}
 	}()
 
-routeNameUUID, err := service.routeRepository.AddRoutes(tx, routeEntity)
+	routeNameUUID, err := service.routeRepository.AddRoutes(tx, routeEntity)
 	if err != nil {
 		tx.Rollback()
 		return fmt.Errorf("failed to add route: %w", err)
 	}
 
-parsedRouteUUID := uuid.MustParse(routeNameUUID)
+	parsedRouteUUID := uuid.MustParse(routeNameUUID)
 
-for _, assignment := range route.RouteAssignment {
+	for _, assignment := range route.RouteAssignment {
 		isDriverAssigned, err := service.routeRepository.IsDriverAssigned(tx, assignment.DriverUUID.String())
 		if err != nil {
 			tx.Rollback()
@@ -185,7 +177,7 @@ for _, assignment := range route.RouteAssignment {
 		}
 	}
 
-if err := tx.Commit(); err != nil {
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
@@ -239,13 +231,13 @@ func (service *routeService) UpdateRoute(route dto.RoutesRequestDTO, routenameUU
 	for _, assignment := range route.RouteAssignment {
 		for _, student := range assignment.Students {
 			routeAssignmentEntity := entity.RouteAssignment{
-				RouteUUID:     uuid.MustParse(routenameUUID),
-				DriverUUID:    assignment.DriverUUID,
-				StudentUUID:   student.StudentUUID,
-				StudentOrder:  student.StudentOrder,
-				SchoolUUID:    uuid.MustParse(schoolUUID),
-				CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
-				CreatedBy:     sql.NullString{String: username, Valid: true},
+				RouteUUID:    uuid.MustParse(routenameUUID),
+				DriverUUID:   assignment.DriverUUID,
+				StudentUUID:  student.StudentUUID,
+				StudentOrder: student.StudentOrder,
+				SchoolUUID:   uuid.MustParse(schoolUUID),
+				CreatedAt:    sql.NullTime{Time: time.Now(), Valid: true},
+				CreatedBy:    sql.NullString{String: username, Valid: true},
 			}
 
 			err := service.routeRepository.UpdateRouteAssignment(tx, routeAssignmentEntity)

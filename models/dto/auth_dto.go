@@ -5,6 +5,10 @@ type LoginRequest struct {
 	Password string `json:"password" validate:"required"`
 }
 
+type DeviceTokenRequest struct {
+	Token string `json:"token" validate:"required"`
+}
+
 type UserDataOnLoginDTO struct {
 	UserID    int64  `json:"user_id"`
 	UserUUID  string `json:"user_uuid"`

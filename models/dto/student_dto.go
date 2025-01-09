@@ -8,6 +8,7 @@ type StudentResponseDTO struct {
 	LastName       string `json:"student_last_name"`
 	Gender         string `json:"student_gender" validate:"required,max=50"`
 	Grade          string `json:"student_grade" validate:"required,max=50"`
+	Status         string `json:"student_status"`
 	ParentUUID     string `json:"parent_uuid,omitempty"`
 	SchoolUUID     string `json:"school_uuid"`
 	SchoolName     string `json:"school_name,omitempty"`
@@ -25,7 +26,8 @@ type StudentRequestDTO struct {
 	StudentLastName    string             `json:"student_last_name" validate:"required"`
 	StudentGender      Gender             `json:"student_gender" validate:"required"`
 	StudentGrade       string             `json:"student_grade" validate:"required"`
-	StudentAddress     string             `json:"student_address" validate:"required"` // Menambahkan field student_address
+	StudentStatus      string             `json:"student_status"`
+	StudentAddress     string             `json:"student_address" validate:"required"`
 	StudentPickupPoint map[string]float64 `json:"student_pickup_point" validate:"required"`
 }
 
@@ -33,8 +35,13 @@ type StudentRequestByParentDTO struct {
 	StudentFirstName   string             `json:"student_first_name" validate:"required"`
 	StudentLastName    string             `json:"student_last_name" validate:"required"`
 	StudentGender      Gender             `json:"student_gender" validate:"required"`
-	StudentAddress     string             `json:"student_address" validate:"required"` // Menambahkan field student_address
+	StudentAddress     string             `json:"student_address" validate:"required"`
 	StudentPickupPoint map[string]float64 `json:"student_pickup_point" validate:"required"`
+	StudentStatus      string             `json:"student_status"`
+}
+
+type StudentStatusRequestByParentDTO struct {
+	StudentStatus string `json:"student_status"`
 }
 
 type SchoolStudentParentRequestDTO struct {
@@ -55,6 +62,7 @@ type SchoolStudentParentResponseDTO struct {
 	StudentLastName  string `json:"student_last_name"`
 	StudentGender    Gender `json:"student_gender"`
 	StudentGrade     string `json:"student_grade"`
+	StudentStatus    string `json:"student_status"`
 	Address          string `json:"student_address"`
 	PickupPoint      string `json:"student_pickup_point"` // Menambahkan field pickup_point
 	ShuttleStatus    string `json:"shuttle_status"`       // Menambahkan field pickup_point
