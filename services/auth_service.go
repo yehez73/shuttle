@@ -11,11 +11,12 @@ import (
 	"shuttle/models/dto"
 	"shuttle/models/entity"
 	"shuttle/repositories"
+	"shuttle/utils"
+
 	// "shuttle/utils"
 
 	"github.com/google/uuid"
 	"github.com/spf13/viper"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type AuthServiceInterface interface {
@@ -27,6 +28,7 @@ type AuthServiceInterface interface {
 	UpdateRefreshToken(userUUID, refreshToken, newRefreshToken string) error
 	// GenerateFCMToken(userUUID, token string) (string, error)
 	AddDeviceToken(userUUID, fcmToken string) error
+	ChangePassword(userUUID, newPassword string) error
 }
 
 type AuthService struct {
@@ -51,14 +53,14 @@ func (service AuthService) Login(email, password string) (userData dto.UserDataO
 	}
 
 	userDataOnLogin := dto.UserDataOnLoginDTO{
-		UserID:    user.ID,
-		UserUUID:  user.UUID,
-		Username:  user.Username,
-		RoleCode:  user.RoleCode,
-		Password:  user.Password,
+		UserID:   user.ID,
+		UserUUID: user.UUID,
+		Username: user.Username,
+		RoleCode: user.RoleCode,
+		Password: user.Password,
 	}
 
-	if !validatePassword(password, userDataOnLogin.Password) {
+	if !utils.ValidatePassword(password, userDataOnLogin.Password) {
 		return dto.UserDataOnLoginDTO{}, errors.New("invalid email or password", 0)
 	}
 
@@ -106,7 +108,7 @@ func (service *AuthService) GetMyProfile(userUUID, roleCode string) (interface{}
 		}
 
 	case "AS":
-		schoolAdminDetails, err := service.userRepository.FetchSchoolAdminDetails(parsedUserUUID)
+		schoolAdminDetails, school, err := service.userRepository.FetchSchoolAdminDetails(parsedUserUUID)
 		if err != nil {
 			return nil, err
 		}
@@ -121,11 +123,12 @@ func (service *AuthService) GetMyProfile(userUUID, roleCode string) (interface{}
 		}
 
 		details, err = json.Marshal(dto.SchoolAdminDetailsResponseDTO{
-			FirstName: schoolAdminDetails.FirstName,
-			LastName:  schoolAdminDetails.LastName,
-			Gender:    dto.Gender(schoolAdminDetails.Gender),
-			Phone:     schoolAdminDetails.Phone,
-			Address:   schoolAdminDetails.Address,
+			FirstName:  schoolAdminDetails.FirstName,
+			LastName:   schoolAdminDetails.LastName,
+			SchoolName: school.Name,
+			Gender:     dto.Gender(schoolAdminDetails.Gender),
+			Phone:      schoolAdminDetails.Phone,
+			Address:    schoolAdminDetails.Address,
 		})
 		if err != nil {
 			return nil, err
@@ -158,7 +161,7 @@ func (service *AuthService) GetMyProfile(userUUID, roleCode string) (interface{}
 		}
 
 	case "D":
-		driverDetails, err := service.userRepository.FetchDriverDetails(parsedUserUUID)
+		driverDetails, vehicle, school, err := service.userRepository.FetchDriverDetails(parsedUserUUID)
 		if err != nil {
 			return nil, err
 		}
@@ -173,11 +176,14 @@ func (service *AuthService) GetMyProfile(userUUID, roleCode string) (interface{}
 		}
 
 		details, err = json.Marshal(dto.DriverDetailsResponseDTO{
-			FirstName: driverDetails.FirstName,
-			LastName:  driverDetails.LastName,
-			Gender:    dto.Gender(driverDetails.Gender),
-			Phone:     driverDetails.Phone,
-			Address:   driverDetails.Address,
+			FirstName:     driverDetails.FirstName,
+			LastName:      driverDetails.LastName,
+			SchoolName:    school.Name,
+			VehicleNumber: vehicle.VehicleNumber,
+			Gender:        dto.Gender(driverDetails.Gender),
+			Phone:         driverDetails.Phone,
+			Address:       driverDetails.Address,
+			LicenseNumber: driverDetails.LicenseNumber,
 		})
 		if err != nil {
 			return nil, err
@@ -200,6 +206,20 @@ func (service *AuthService) GetMyProfile(userUUID, roleCode string) (interface{}
 	}
 
 	return result, nil
+}
+
+func (service *AuthService) ChangePassword(userUUID, newPassword string) error {
+	hashedPassword, err := utils.HashPassword(newPassword)
+	if err != nil {
+		return err
+	}
+
+	err = service.authRepository.UpdatePassword(userUUID, hashedPassword)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (service *AuthService) CheckStoredRefreshToken(userUUID string, refreshToken string) error {
@@ -307,17 +327,4 @@ func contains(slice []string, item string) bool {
 		}
 	}
 	return false
-}
-
-func hashPassword(password string) (string, error) {
-	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-	return string(hashedPassword), nil
-}
-
-func validatePassword(providedPassword, storedPassword string) bool {
-	err := bcrypt.CompareHashAndPassword([]byte(storedPassword), []byte(providedPassword))
-	return err == nil
 }

@@ -65,6 +65,8 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	protected.Get("/my/profile", authHandler.GetMyProfile)
 	protected.Put("/my/profile/update", authHandler.UpdateMyProfile)
 
+	protected.Patch("/change-password", authHandler.ChangePassword)
+
 	protected.Post("/logout", authHandler.Logout)
 	protected.Post("/device-token", authHandler.AddDeviceToken)
 

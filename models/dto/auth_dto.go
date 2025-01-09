@@ -9,6 +9,11 @@ type DeviceTokenRequest struct {
 	Token string `json:"token" validate:"required"`
 }
 
+type ChangePasswordRequest struct {
+	OldPassword string `json:"old_password" validate:"required,min=8"`
+	NewPassword string `json:"new_password" validate:"required,min=8"`
+}
+
 type UserDataOnLoginDTO struct {
 	UserID    int64  `json:"user_id"`
 	UserUUID  string `json:"user_uuid"`

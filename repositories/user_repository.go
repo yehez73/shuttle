@@ -34,9 +34,9 @@ type UserRepositoryInterface interface {
 	FetchSpecSchoolAdmin(userUUID string) (entity.User, entity.School, error)
 
 	FetchSuperAdminDetails(userUUID uuid.UUID) (entity.SuperAdminDetails, error)
-	FetchSchoolAdminDetails(userUUID uuid.UUID) (entity.SchoolAdminDetails, error)
+	FetchSchoolAdminDetails(userUUID uuid.UUID) (entity.SchoolAdminDetails, entity.School, error)
 	FetchParentDetails(userUUID uuid.UUID) (entity.ParentDetails, error)
-	FetchDriverDetails(userUUID uuid.UUID) (entity.DriverDetails, error)
+	FetchDriverDetails(userUUID uuid.UUID) (entity.DriverDetails, entity.Vehicle, entity.School, error)
 
 	SaveUser(tx *sqlx.Tx, user entity.User) (uuid.UUID, error)
 	SaveSuperAdminDetails(tx *sqlx.Tx, details entity.SuperAdminDetails, userUUID uuid.UUID) error
@@ -696,15 +696,33 @@ func (r *userRepository) FetchSuperAdminDetails(userUUID uuid.UUID) (entity.Supe
 	return superAdminDetails, nil
 }
 
-func (r *userRepository) FetchSchoolAdminDetails(userUUID uuid.UUID) (entity.SchoolAdminDetails, error) {
+func (r *userRepository) FetchSchoolAdminDetails(userUUID uuid.UUID) (entity.SchoolAdminDetails, entity.School, error) {
 	var schoolAdminDetails entity.SchoolAdminDetails
-	query := `SELECT school_uuid, user_picture, user_first_name, user_last_name, user_gender, user_phone, user_address
-			  FROM school_admin_details WHERE user_uuid = $1`
-	if err := r.DB.Get(&schoolAdminDetails, query, userUUID); err != nil {
-		return schoolAdminDetails, err
+	var school entity.School
+
+	query := `
+		SELECT
+			sad.school_uuid,
+			COALESCE(
+				CASE
+					WHEN s.deleted_at IS NULL THEN s.school_name
+				END,
+				'N/A'
+			) AS school_name,
+			sad.user_picture, sad.user_first_name, sad.user_last_name, sad.user_gender, sad.user_phone, sad.user_address
+		FROM school_admin_details sad
+		LEFT JOIN schools s ON sad.school_uuid = s.school_uuid
+		WHERE sad.user_uuid = $1
+	`
+	err := r.DB.QueryRowx(query, userUUID).Scan(
+		&schoolAdminDetails.SchoolUUID, &school.Name, &schoolAdminDetails.Picture, &schoolAdminDetails.FirstName,
+		&schoolAdminDetails.LastName, &schoolAdminDetails.Gender, &schoolAdminDetails.Phone, &schoolAdminDetails.Address,
+	)
+	if err != nil {
+		return schoolAdminDetails, school, err
 	}
 
-	return schoolAdminDetails, nil
+	return schoolAdminDetails, school, nil		
 }
 
 func (r *userRepository) FetchParentDetails(userUUID uuid.UUID) (entity.ParentDetails, error) {
@@ -718,15 +736,44 @@ func (r *userRepository) FetchParentDetails(userUUID uuid.UUID) (entity.ParentDe
 	return parentDetails, nil
 }
 
-func (r *userRepository) FetchDriverDetails(userUUID uuid.UUID) (entity.DriverDetails, error) {
+func (r *userRepository) FetchDriverDetails(userUUID uuid.UUID) (entity.DriverDetails, entity.Vehicle, entity.School, error) {
 	var driverDetails entity.DriverDetails
-	query := `SELECT school_uuid, school_uuid, user_picture, user_first_name, user_last_name, user_gender, user_phone, user_address, user_license_number
-			  FROM driver_details WHERE user_uuid = $1`
-	if err := r.DB.Get(&driverDetails, query, userUUID); err != nil {
-		return driverDetails, err
+	var vehicle entity.Vehicle
+	var school entity.School
+
+	query := `
+		SELECT 
+			d.school_uuid,
+			COALESCE(
+				CASE
+					WHEN s.deleted_at IS NULL THEN s.school_name
+				END,
+				'N/A'
+			) AS school_name,
+			d.vehicle_uuid,
+			COALESCE(
+				CASE
+					WHEN v.deleted_at IS NULL THEN v.vehicle_number
+				END,
+				'N/A'
+			) AS vehicle_number,
+			d.user_picture, d.user_first_name, d.user_last_name, d.user_gender,
+			d.user_phone, d.user_address, d.user_license_number
+		FROM driver_details d
+		LEFT JOIN schools s ON d.school_uuid = s.school_uuid
+		LEFT JOIN vehicles v ON d.vehicle_uuid = v.vehicle_uuid
+		WHERE d.user_uuid = $1
+	`
+	err := r.DB.QueryRowx(query, userUUID).Scan(
+		&driverDetails.SchoolUUID, &school.Name, &driverDetails.VehicleUUID, &vehicle.VehicleNumber,
+		&driverDetails.Picture, &driverDetails.FirstName, &driverDetails.LastName, &driverDetails.Gender,
+		&driverDetails.Phone, &driverDetails.Address, &driverDetails.LicenseNumber,
+	)
+	if err != nil {
+		return driverDetails, vehicle, school, err
 	}
 
-	return driverDetails, nil
+	return driverDetails, vehicle, school, nil
 }
 
 func (r *userRepository) SaveUser(tx *sqlx.Tx, userEntity entity.User) (uuid.UUID, error) {

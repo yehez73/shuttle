@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"shuttle/logger"
 	"shuttle/models/dto"
 	"shuttle/services"
 	"shuttle/utils"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -18,6 +20,7 @@ type AuthHandlerInterface interface {
 	UpdateMyProfile(c *fiber.Ctx) error
 	IssueNewAccessToken(c *fiber.Ctx) error
 	AddDeviceToken(c *fiber.Ctx) error
+	ChangePassword(c *fiber.Ctx) error
 }
 
 type authHandler struct {
@@ -170,6 +173,13 @@ func (handler *authHandler) UpdateMyProfile(c *fiber.Ctx) error {
 	updateRequest.Password = existingUser.User.Password
 	updateRequest.Role = dto.Role(existingUser.User.Role)
 	updateRequest.RoleCode = existingUser.User.RoleCode
+	// Marshall existing user details to JSON.RawMessage whether its a super admin, school admin, or driver
+	mergedDetails, err := mergeDetails(updateRequest.Details, existingUser.Details)
+	if err != nil {
+		logger.LogError(err, "Failed to merge user details", nil)
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+	updateRequest.Details = mergedDetails
 
 	err = handler.userService.UpdateUser(userUUID, *updateRequest, username, nil)
 	if err != nil {
@@ -180,6 +190,42 @@ func (handler *authHandler) UpdateMyProfile(c *fiber.Ctx) error {
 	}
 
 	return utils.SuccessResponse(c, "User profile updated", nil)
+}
+
+func (handler *authHandler) ChangePassword(c *fiber.Ctx) error {
+	userUUID, ok := c.Locals("userUUID").(string)
+	if !ok {
+		return utils.UnauthorizedResponse(c, "Token is invalid", nil)
+	}
+
+	changePasswordRequest := new(dto.ChangePasswordRequest)
+	if err := c.BodyParser(changePasswordRequest); err != nil {
+		return utils.BadRequestResponse(c, "Invalid request data", nil)
+	}
+
+	if err := utils.ValidateStruct(c, changePasswordRequest); err != nil {
+		return utils.BadRequestResponse(c, strings.ToUpper(err.Error()[0:1])+err.Error()[1:], nil)
+	}
+
+	existingUser, err := handler.userService.GetSpecUserWithDetails(userUUID)
+	if err != nil {
+		logger.LogError(err, "Failed to fetch user", nil)
+		return utils.NotFoundResponse(c, "User not found", nil)
+	}
+
+	if !utils.ValidatePassword(changePasswordRequest.OldPassword, existingUser.User.Password) {
+		return utils.BadRequestResponse(c, "Invalid old password", nil)
+	}
+
+	err = handler.authService.ChangePassword(userUUID, changePasswordRequest.NewPassword)
+	if err != nil {
+		logger.LogError(err, "Failed to change password", map[string]interface{}{
+			"user_uuid": userUUID,
+		})
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	return utils.SuccessResponse(c, "Password changed successfully", nil)
 }
 
 // Reissue a new access token
@@ -281,4 +327,57 @@ func (handler *authHandler) AddDeviceToken(c *fiber.Ctx) error {
 	// Return the generated token as part of the response
 
 	return utils.SuccessResponse(c, "Device token added successfully", nil)
+}
+
+func mergeDetails(updateRequestDetails, existingDetails json.RawMessage) (json.RawMessage, error) {
+	// Unmarshal `existingDetails` into a map
+	var existingDetailsMap map[string]interface{}
+	if len(existingDetails) > 0 {
+		if err := json.Unmarshal(existingDetails, &existingDetailsMap); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal existingDetails: %w", err)
+		}
+	}
+
+	// Unmarshal `updateRequestDetails` into a map
+	var updateDetailsMap map[string]interface{}
+	if len(updateRequestDetails) > 0 {
+		if err := json.Unmarshal(updateRequestDetails, &updateDetailsMap); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal updateRequestDetails: %w", err)
+		}
+	}
+
+	// Create the merged map
+	mergedDetailsMap := make(map[string]interface{})
+	for pascalKey, existingValue := range existingDetailsMap {
+		// Convert PascalCase key to snake_case for matching
+		snakeKey := pascalToSnakeCase(pascalKey)
+
+		// If there's a value in updateRequestDetails for the snake_case key, use it
+		if updateValue, exists := updateDetailsMap[snakeKey]; exists {
+			mergedDetailsMap[pascalKey] = updateValue
+		} else {
+			// Otherwise, keep the existing value
+			mergedDetailsMap[pascalKey] = existingValue
+		}
+	}
+
+	// Marshal the merged map back to json.RawMessage
+	mergedDetails, err := json.Marshal(mergedDetailsMap)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal merged details: %w", err)
+	}
+
+	return json.RawMessage(mergedDetails), nil
+}
+
+// Utility function to convert PascalCase to snake_case
+func pascalToSnakeCase(input string) string {
+	var result []rune
+	for i, r := range input {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			result = append(result, '_')
+		}
+		result = append(result, r)
+	}
+	return strings.ToLower(string(result))
 }

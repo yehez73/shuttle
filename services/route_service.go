@@ -155,7 +155,7 @@ func (service *routeService) AddRoute(route dto.RoutesRequestDTO, schoolUUID, us
 
 			if student.StudentOrder == "" || student.StudentOrder == "0" {
 				tx.Rollback()
-				return fmt.Errorf("Student order cannot be empty or zero")
+				return fmt.Errorf("student order cannot be empty or zero")
 			}
 
 			routeAssignmentEntity := entity.RouteAssignment{

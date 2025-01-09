@@ -10,10 +10,12 @@ import (
 	"shuttle/models/dto"
 	"shuttle/models/entity"
 	"shuttle/repositories"
+	"shuttle/utils"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
+	"github.com/mitchellh/mapstructure"
 )
 
 type UserServiceInterface interface {
@@ -56,11 +58,13 @@ func NewUserService(userRepository repositories.UserRepositoryInterface) UserSer
 }
 
 func (service *UserService) GetDriverDetailsByUUID(driverUUID uuid.UUID) (entity.DriverDetails, error) {
-	return service.userRepository.FetchDriverDetails(driverUUID)
+	driverDetails, _, _, err := service.userRepository.FetchDriverDetails(driverUUID)
+    return driverDetails, err
 }
 
 func (service *UserService) GetSchoolAdminDetailsByUUID(schoolAdminUUID uuid.UUID) (entity.SchoolAdminDetails, error) {
-	return service.userRepository.FetchSchoolAdminDetails(schoolAdminUUID)
+	schoolAdminDetails, _, err := service.userRepository.FetchSchoolAdminDetails(schoolAdminUUID)
+	return schoolAdminDetails, err
 }
 
 func (service *UserService) GetAllSuperAdmin(page int, limit int, sortField, sortDirection string) ([]dto.UserResponseDTO, int, error) {
@@ -135,7 +139,7 @@ func (service *UserService) GetAllSchoolAdmin(page int, limit int, sortField, so
 			CreatedAt:  safeTimeFormat(user.CreatedAt),
 		}
 
-		schoolAdminDetails, err := service.userRepository.FetchSchoolAdminDetails(user.UUID)
+		schoolAdminDetails, _, err := service.userRepository.FetchSchoolAdminDetails(user.UUID)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -184,7 +188,7 @@ func (service *UserService) GetAllDriverFromAllSchools(page int, limit int, sort
 			CreatedAt:  safeTimeFormat(user.CreatedAt),
 		}
 
-		driverDetails, err := service.userRepository.FetchDriverDetails(user.UUID)
+		driverDetails, _, _, err := service.userRepository.FetchDriverDetails(user.UUID)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -243,7 +247,7 @@ func (service *UserService) GetAllDriverForPermittedSchool(page int, limit int, 
 			CreatedAt:  safeTimeFormat(user.CreatedAt),
 		}
 
-		driverDetails, err := service.userRepository.FetchDriverDetails(user.UUID)
+		driverDetails, _, _, err := service.userRepository.FetchDriverDetails(user.UUID)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -328,7 +332,7 @@ func (service *UserService) GetSpecSchoolAdmin(id string) (dto.UserResponseDTO, 
 		UpdatedBy:  safeStringFormat(user.UpdatedBy),
 	}
 
-	schoolAdminDetails, err := service.userRepository.FetchSchoolAdminDetails(user.UUID)
+	schoolAdminDetails, _, err := service.userRepository.FetchSchoolAdminDetails(user.UUID)
 	if err != nil {
 		return dto.UserResponseDTO{}, err
 	}
@@ -370,7 +374,7 @@ func (service *UserService) GetSpecDriverFromAllSchools(id string) (dto.UserResp
 		UpdatedBy:  safeStringFormat(user.UpdatedBy),
 	}
 
-	driverDetails, err := service.userRepository.FetchDriverDetails(user.UUID)
+	driverDetails, _, _, err := service.userRepository.FetchDriverDetails(user.UUID)
 	if err != nil {
 		return dto.UserResponseDTO{}, err
 	}
@@ -434,7 +438,7 @@ func (service *UserService) GetSpecDriverForPermittedSchool(driverUUID string, s
 		UpdatedBy:  safeStringFormat(user.UpdatedBy),
 	}
 
-	driverDetails, err := service.userRepository.FetchDriverDetails(user.UUID)
+	driverDetails, _, _, err := service.userRepository.FetchDriverDetails(user.UUID)
 	if err != nil {
 		return dto.UserResponseDTO{}, err
 	}
@@ -460,7 +464,7 @@ func (service *UserService) GetSpecDriverForPermittedSchool(driverUUID string, s
 		Picture:       driverDetails.Picture,
 		FirstName:     driverDetails.FirstName,
 		LastName:      driverDetails.LastName,
-		Gender: 	  dto.Gender(driverDetails.Gender),
+		Gender:        dto.Gender(driverDetails.Gender),
 		Phone:         driverDetails.Phone,
 		Address:       driverDetails.Address,
 		LicenseNumber: driverDetails.LicenseNumber,
@@ -492,7 +496,7 @@ func (s *UserService) AddUser(req dto.UserRequestsDTO, user_name string) (uuid.U
 	}
 
 	if req.Password != "" {
-		hashedPassword, err := hashPassword(req.Password)
+		hashedPassword, err := utils.HashPassword(req.Password)
 		if err != nil {
 			return uuid.Nil, err
 		}
@@ -684,6 +688,7 @@ type UserWithDetails struct {
 	SchoolAdminDetails *entity.SchoolAdminDetails `json:"school_admin_details,omitempty"`
 	DriverDetails      *entity.DriverDetails      `json:"driver_details,omitempty"`
 	ParentDetails      *entity.ParentDetails      `json:"parent_details,omitempty"`
+	Details            json.RawMessage            `json:"details"`
 }
 
 func (service *UserService) GetSpecUserWithDetails(id string) (UserWithDetails, error) {
@@ -696,6 +701,8 @@ func (service *UserService) GetSpecUserWithDetails(id string) (UserWithDetails, 
 		User: user,
 	}
 
+	var details interface{}
+
 	switch user.RoleCode {
 	case "SA":
 		superAdminDetails, err := service.userRepository.FetchSuperAdminDetails(user.UUID)
@@ -703,13 +710,15 @@ func (service *UserService) GetSpecUserWithDetails(id string) (UserWithDetails, 
 			return UserWithDetails{}, err
 		}
 		userWithDetails.SuperAdminDetails = &superAdminDetails
+		details = superAdminDetails
 
 	case "AS":
-		schoolAdminDetails, err := service.userRepository.FetchSchoolAdminDetails(user.UUID)
+		schoolAdminDetails, _, err := service.userRepository.FetchSchoolAdminDetails(user.UUID)
 		if err != nil {
 			return UserWithDetails{}, err
 		}
 		userWithDetails.SchoolAdminDetails = &schoolAdminDetails
+		details = schoolAdminDetails
 
 	case "P":
 		parentDetails, err := service.userRepository.FetchParentDetails(user.UUID)
@@ -717,16 +726,27 @@ func (service *UserService) GetSpecUserWithDetails(id string) (UserWithDetails, 
 			return UserWithDetails{}, err
 		}
 		userWithDetails.ParentDetails = &parentDetails
+		details = parentDetails
 
 	case "D":
-		driverDetails, err := service.userRepository.FetchDriverDetails(user.UUID)
+		driverDetails, _, _, err := service.userRepository.FetchDriverDetails(user.UUID)
 		if err != nil {
 			return UserWithDetails{}, err
 		}
 		userWithDetails.DriverDetails = &driverDetails
+		details = driverDetails
 
 	default:
 		return UserWithDetails{}, errors.New("invalid role code", 0)
+	}
+
+	// Convert details to JSON RawMessage
+	if details != nil {
+		detailsJSON, err := json.Marshal(details)
+		if err != nil {
+			return UserWithDetails{}, err
+		}
+		userWithDetails.Details = detailsJSON
 	}
 
 	return userWithDetails, nil
@@ -809,9 +829,7 @@ func (s *UserService) saveRoleDetails(tx *sqlx.Tx, userUUID uuid.UUID, req dto.U
 		if err != nil {
 			return errors.New("invalid driver details format: "+err.Error(), 400)
 		}
-		
-		fmt.Printf("driver details: %+v\n", parsedDetails)
-		println("vehicleUUID: ", parsedDetails.VehicleUUID)
+
 		driverDetails := entity.DriverDetails{
 			SchoolUUID:    parseSafeUUID(parsedDetails.SchoolUUID),
 			VehicleUUID:   parseSafeUUID(parsedDetails.VehicleUUID),
@@ -846,13 +864,13 @@ func (s *UserService) updateRoleDetails(tx *sqlx.Tx, req dto.UserRequestsDTO, id
 		}
 
 	case entity.SchoolAdmin:
-		var details dto.SchoolAdminDetailsRequestsDTO
-		if err := json.Unmarshal(req.Details, &details); err != nil {
+		details, err := parseMapStruct[dto.SchoolAdminDetailsRequestsDTO](req.Details)
+		if err != nil {
 			return errors.New("invalid school admin details format", 400)
 		}
 
 		schoolDetails := entity.SchoolAdminDetails{
-			SchoolUUID: uuid.MustParse(details.SchoolUUID),
+			SchoolUUID: *parseSafeUUID(details.SchoolUUID),
 			Picture:    req.Picture,
 			FirstName:  req.FirstName,
 			LastName:   req.LastName,
@@ -874,11 +892,11 @@ func (s *UserService) updateRoleDetails(tx *sqlx.Tx, req dto.UserRequestsDTO, id
 		}
 		if err := s.userRepository.UpdateParentDetails(tx, details, id); err != nil {
 			return err
-		}			
+		}
 
 	case entity.Driver:
-		var details dto.DriverDetailsRequestsDTO
-		if err := json.Unmarshal(req.Details, &details); err != nil {
+		details, err := parseMapStruct[dto.DriverDetailsRequestsDTO](req.Details)
+		if err != nil {
 			return errors.New("invalid driver details format", 400)
 		}
 
@@ -925,6 +943,21 @@ func parseDetails[T any](details json.RawMessage) (T, error) {
 	err := json.Unmarshal(details, &parsedDetails)
 	if err != nil {
 		return parsedDetails, fmt.Errorf("failed to unmarshal details to struct: %w", err)
+	}
+
+	return parsedDetails, nil
+}
+
+func parseMapStruct[T any](details json.RawMessage) (T, error) {
+	var parsedDetails T
+
+	var genericMap map[string]interface{}
+	if err := json.Unmarshal(details, &genericMap); err != nil {
+		return parsedDetails, fmt.Errorf("failed to unmarshal details to map: %w", err)
+	}
+
+	if err := mapstructure.Decode(genericMap, &parsedDetails); err != nil {
+		return parsedDetails, fmt.Errorf("failed to decode map to struct: %w", err)
 	}
 
 	return parsedDetails, nil

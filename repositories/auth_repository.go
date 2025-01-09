@@ -10,6 +10,7 @@ import (
 
 type AuthRepositoryInterface interface {
 	Login(email string) (entity.UserDataOnLogin, error)
+	UpdatePassword(userUUID, newPassword string) error
 	CheckRefreshTokenData(userUUID, token string) (entity.RefreshToken, error)
 	DeleteRefreshToken(ctx context.Context, userUUID string) error
 	UpdateUserStatus(userUUID, status string, lastActive time.Time) error
@@ -43,6 +44,21 @@ func (r *authRepository) Login(email string) (entity.UserDataOnLogin, error) {
 	}
 
 	return user, nil
+}
+
+func (r *authRepository) UpdatePassword(userUUID, newPassword string) error {
+	query := `
+		UPDATE users
+		SET user_password = $1
+		WHERE user_uuid = $2
+	`
+
+	_, err := r.DB.Exec(query, newPassword, userUUID)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (r *authRepository) CheckRefreshTokenData(userUUID, token string) (entity.RefreshToken, error) {
