@@ -14,7 +14,7 @@ import (
 
 type ShuttleServiceInterface interface {
 	GetShuttleTrackByParent(parentUUID uuid.UUID) ([]dto.ShuttleResponse, error)
-	GetAllShuttleByParent(parentUUID uuid.UUID) ([]dto.ShuttleAllResponse, error)
+	GetAllShuttleByParent(parentUUID uuid.UUID, page, limit int, sortField, sortDirection string) ([]dto.ShuttleAllResponse, int, error)
 	GetAllShuttleByDriver(driverUUID uuid.UUID) ([]dto.ShuttleAllResponse, error)
 	GetSpecShuttle(shuttleUUID uuid.UUID) ([]dto.ShuttleSpecResponse, error)
 	AddShuttle(req dto.ShuttleRequest, driverUUID, createdBy string) error
@@ -62,33 +62,21 @@ func (s *ShuttleService) GetShuttleTrackByParent(parentUUID uuid.UUID) ([]dto.Sh
 	return responses, nil
 }
 
-func (s *ShuttleService) GetAllShuttleByParent(parentUUID uuid.UUID) ([]dto.ShuttleAllResponse, error) {
-	// Fetch data from the repository
-	shuttles, err := s.shuttleRepository.FetchAllShuttleByParent(parentUUID)
-	if err != nil {
-		return nil, err
-	}
+func (s *ShuttleService) GetAllShuttleByParent(parentUUID uuid.UUID, page, limit int, sortField, sortDirection string) ([]dto.ShuttleAllResponse, int, error) {
+    offset := (page - 1) * limit
 
-	// Transform the data if needed (DTO is already in the required format)
-	responses := make([]dto.ShuttleAllResponse, len(shuttles))
-	for i, shuttle := range shuttles {
-		responses[i] = dto.ShuttleAllResponse{
-			ShuttleUUID:    shuttle.ShuttleUUID,
-			StudentUUID:     shuttle.StudentUUID,
-			Status:          shuttle.Status,
-			StudentFirstName: shuttle.StudentFirstName,
-			StudentLastName:  shuttle.StudentLastName,
-			StudentGrade:     shuttle.StudentGrade,
-			StudentGender:    shuttle.StudentGender,
-			ParentUUID:       shuttle.ParentUUID,
-			SchoolUUID:       shuttle.SchoolUUID,
-			SchoolName:       shuttle.SchoolName,
-			CreatedAt:        shuttle.CreatedAt,
-			UpdatedAt:        shuttle.UpdatedAt,
-		}
-	}
+    // Panggil repository untuk mendapatkan data dan total items
+    shuttles, err := s.shuttleRepository.FetchAllShuttleByParent(offset, limit, sortField, sortDirection, parentUUID)
+    if err != nil {
+        return nil, 0, err
+    }
 
-	return responses, nil
+    totalItems, err := s.shuttleRepository.CountShuttlesByParent(parentUUID)
+    if err != nil {
+        return nil, 0, err
+    }
+
+    return shuttles, totalItems, nil
 }
 
 func (s *ShuttleService) GetAllShuttleByDriver(driverUUID uuid.UUID) ([]dto.ShuttleAllResponse, error) {

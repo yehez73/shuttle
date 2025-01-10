@@ -17,6 +17,7 @@ import (
 type StudentHandlerInterface interface {
 	GetAllStudentWithParents(c *fiber.Ctx) error
 	GetSpecStudentWithParents(c *fiber.Ctx) error
+	GetAvailableStudents(c *fiber.Ctx) error
 	AddSchoolStudentWithParents(c *fiber.Ctx) error
 	UpdateSchoolStudentWithParents(c *fiber.Ctx) error
 	DeleteSchoolStudentWithParentsIfNeccessary(c *fiber.Ctx) error
@@ -124,6 +125,22 @@ func (handler *studentHandler) GetSpecStudentWithParents(c *fiber.Ctx) error {
 	}
 
 	return utils.SuccessResponse(c, "Students fetched successfully", students)
+}
+
+func (handler *studentHandler) GetAvailableStudents(c *fiber.Ctx) error {
+	schoolUUID, ok := c.Locals("schoolUUID").(string)
+	if !ok {
+		return utils.BadRequestResponse(c, "Invalid token or schoolUUID", nil)
+	}
+
+	students, err := handler.studentService.GetAvailableStudents(schoolUUID)
+	if err != nil {
+		return utils.InternalServerErrorResponse(c, "Failed to fetch students", err)
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"students": students,
+	})
 }
 
 func (handler *studentHandler) AddSchoolStudentWithParents(c *fiber.Ctx) error {

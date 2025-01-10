@@ -3,29 +3,36 @@ package repositories
 import (
 	"database/sql"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/jmoiron/sqlx"
+	"time"
 	"shuttle/models/dto"
 	"shuttle/models/entity"
-	"time"
+	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 )
 
 type RouteRepositoryInterface interface {
-	FetchAllRoutesByAS(schoolUUID string) ([]dto.RoutesResponseDTO, error)
+	CountRoutesBySchool(schoolUUID string) (int, error)
+	FetchAllRoutesByAS(offset, limit int, sortField, sortDirection, schoolUUID string) ([]dto.RoutesResponseDTO, error)
 	FetchSpecRouteByAS(route_name_UUID, driverUUID string) ([]entity.RouteAssignment, error)
 	FetchAllRoutesByDriver(driverUUID string) ([]dto.RouteResponseByDriverDTO, error)
+
 	AddRoutes(tx *sql.Tx, route entity.Routes) (string, error)
 	AddRouteAssignment(tx *sql.Tx, assignment entity.RouteAssignment) error
-	IsStudentAssigned(tx *sql.Tx, studentUUID string) (bool, error)
-	IsDriverAssigned(tx *sql.Tx, driverUUID string) (bool, error)
-	BeginTransaction() (*sql.Tx, error)
+	
 	UpdateRoute(tx *sql.Tx, route entity.Routes) error
 	UpdateRouteAssignment(tx *sql.Tx, assignment entity.RouteAssignment) error
+
 	DeleteRoute(tx *sql.Tx, routenameUUID, schoolUUID string) error
 	DeleteRouteAssignments(tx *sql.Tx, routenameUUID, schoolUUID string) error
-	ValidateDriverVehicle(driverUUID string) (bool, error)
-	GetSchoolUUIDByUserUUID(userUUID string, schoolUUID *string) error
+
+	BeginTransaction() (*sql.Tx, error)
+
+	IsDriverAssigned(tx *sql.Tx, driverUUID string) (bool, error)
+	IsStudentAssigned(tx *sql.Tx, studentUUID string) (bool, error)
+
 	GetDriverUUIDByRouteName(routeNameUUID string) (string, error)
+	ValidateDriverVehicle(driverUUID string) (bool, error)
+
 	RouteExists(tx *sql.Tx, routenameUUID, schoolUUID string) (bool, error)
 }
 
@@ -43,8 +50,24 @@ func (r *routeRepository) BeginTransaction() (*sql.Tx, error) {
 	return r.DB.Begin()
 }
 
-func (r *routeRepository) FetchAllRoutesByAS(schoolUUID string) ([]dto.RoutesResponseDTO, error) {
+func (r *routeRepository) CountRoutesBySchool(schoolUUID string) (int, error) {
 	query := `
+	SELECT COUNT(*)
+	FROM routes
+	WHERE school_uuid = $1
+	`
+
+	var total int
+	err := r.DB.QueryRow(query, schoolUUID).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+
+	return total, nil
+}
+
+func (r *routeRepository) FetchAllRoutesByAS(offset, limit int, sortField, sortDirection, schoolUUID string) ([]dto.RoutesResponseDTO, error) {
+	query := fmt.Sprintf(`
 	SELECT 
 		route_name_uuid, 
 		route_name, 
@@ -55,9 +78,11 @@ func (r *routeRepository) FetchAllRoutesByAS(schoolUUID string) ([]dto.RoutesRes
 		updated_by
 	FROM routes
 	WHERE school_uuid = $1
-	`
+	ORDER BY %s %s
+	LIMIT $2 OFFSET $3
+	`, sortField, sortDirection)
 
-	rows, err := r.DB.Query(query, schoolUUID)
+	rows, err := r.DB.Query(query, schoolUUID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -125,8 +150,8 @@ func (r *routeRepository) FetchSpecRouteByAS(routeNameUUID, driverUUID string) (
             s.student_uuid,
             COALESCE(s.student_first_name, '') AS student_first_name,
             COALESCE(s.student_last_name, '') AS student_last_name,
-			s.student_status
-            COALESCE(ra.student_order, 0) AS student_order,
+			s.student_status,
+            COALESCE(ra.student_order, 0) AS student_order
         FROM routes r
         LEFT JOIN route_assignment ra ON r.route_name_uuid = ra.route_name_uuid
         LEFT JOIN driver_details d ON ra.driver_uuid = d.user_uuid
@@ -327,19 +352,6 @@ func (r *routeRepository) IsStudentAssigned(tx *sql.Tx, studentUUID string) (boo
 		return false, fmt.Errorf("error checking student assignment: %w", err)
 	}
 	return count > 0, nil
-}
-
-func (r *routeRepository) GetSchoolUUIDByUserUUID(userUUID string, schoolUUID *string) error {
-	query := `
-		SELECT school_uuid
-		FROM school_admin_details
-		WHERE user_uuid = $1
-	`
-	err := r.DB.QueryRow(query, userUUID).Scan(schoolUUID)
-	if err != nil {
-		return fmt.Errorf("failed to get school UUID for user: %w", err)
-	}
-	return nil
 }
 
 func (r *routeRepository) GetDriverUUIDByRouteName(routeNameUUID string) (string, error) {

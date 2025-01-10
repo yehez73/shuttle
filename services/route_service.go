@@ -3,22 +3,23 @@ package services
 import (
 	"database/sql"
 	"fmt"
-	"github.com/google/uuid"
 	"shuttle/models/dto"
 	"shuttle/models/entity"
 	"shuttle/repositories"
 	"time"
+	"github.com/google/uuid"
 )
 
 type RouteServiceInterface interface {
-	GetAllRoutesByAS(schoolUUID string) ([]dto.RoutesResponseDTO, error)
+	GetAllRoutesByAS(page, limit int, sortField, sortDirection, schoolUUID string) ([]dto.RoutesResponseDTO, int, error)
 	GetSpecRouteByAS(routeNameUUID, driverUUID string) (dto.RoutesResponseDTO, error)
 	GetAllRoutesByDriver(driverUUID string) ([]dto.RouteResponseByDriverDTO, error)
+
 	AddRoute(route dto.RoutesRequestDTO, schoolUUID, username string) error
-	GetSchoolUUIDByUserUUID(userUUID string) (string, error)
-	GetDriverUUIDByRouteName(routeNameUUID string) (string, error)
-	UpdateRoute(route dto.RoutesRequestDTO, routenameUUID, schoolUUID, username string) error
+	UpdateRoute(route dto.RoutesRequestDTO, routenameUUID, schoolUUID, username string) error 
 	DeleteRoute(routenameUUID, schoolUUID, username string) error
+
+	GetDriverUUIDByRouteName(routeNameUUID string) (string, error)
 }
 
 type routeService struct {
@@ -31,13 +32,23 @@ func NewRouteService(routeRepository repositories.RouteRepositoryInterface) Rout
 	}
 }
 
-func (service *routeService) GetAllRoutesByAS(schoolUUID string) ([]dto.RoutesResponseDTO, error) {
-	routes, err := service.routeRepository.FetchAllRoutesByAS(schoolUUID)
+func (service *routeService) GetAllRoutesByAS(page, limit int, sortField, sortDirection, schoolUUID string) ([]dto.RoutesResponseDTO, int, error) {
+	offset := (page - 1) * limit
+
+	// Panggil repository untuk mendapatkan data dan total items
+	routes, err := service.routeRepository.FetchAllRoutesByAS(offset, limit, sortField, sortDirection, schoolUUID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get routes: %w", err)
+		return nil, 0, fmt.Errorf("failed to get routes: %w", err)
 	}
-	return routes, nil
+
+	totalItems, err := service.routeRepository.CountRoutesBySchool(schoolUUID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count routes: %w", err)
+	}
+
+	return routes, totalItems, nil
 }
+
 
 func (s *routeService) GetSpecRouteByAS(routeNameUUID, driverUUID string) (dto.RoutesResponseDTO, error) {
 	if driverUUID == "" {
@@ -76,7 +87,7 @@ func (s *routeService) GetSpecRouteByAS(routeNameUUID, driverUUID string) (dto.R
 			StudentUUID:      route.StudentUUID.String(),
 			StudentFirstName: defaultString(route.StudentFirstName),
 			StudentLastName:  defaultString(route.StudentLastName),
-			StudentStatus:    route.StudentStatus,
+			StudentStatus: route.StudentStatus,
 			StudentOrder:     route.StudentOrder,
 		}
 		driverInfo.Students = append(driverInfo.Students, student)
@@ -102,6 +113,11 @@ func (service *routeService) GetAllRoutesByDriver(driverUUID string) ([]dto.Rout
 }
 
 func (service *routeService) AddRoute(route dto.RoutesRequestDTO, schoolUUID, username string) error {
+
+	if err := ValidateDuplicateStudents(route.RouteAssignment); err != nil {
+		return err
+	}
+
 	routeEntity := entity.Routes{
 		RouteID:          time.Now().UnixMilli()*1e6 + int64(uuid.New().ID()%1e6),
 		RouteNameUUID:    uuid.New(),
@@ -123,6 +139,7 @@ func (service *routeService) AddRoute(route dto.RoutesRequestDTO, schoolUUID, us
 		}
 	}()
 
+	// Insert route ke database
 	routeNameUUID, err := service.routeRepository.AddRoutes(tx, routeEntity)
 	if err != nil {
 		tx.Rollback()
@@ -131,6 +148,7 @@ func (service *routeService) AddRoute(route dto.RoutesRequestDTO, schoolUUID, us
 
 	parsedRouteUUID := uuid.MustParse(routeNameUUID)
 
+	// Insert route assignment
 	for _, assignment := range route.RouteAssignment {
 		isDriverAssigned, err := service.routeRepository.IsDriverAssigned(tx, assignment.DriverUUID.String())
 		if err != nil {
@@ -184,23 +202,6 @@ func (service *routeService) AddRoute(route dto.RoutesRequestDTO, schoolUUID, us
 	return nil
 }
 
-func (s *routeService) GetSchoolUUIDByUserUUID(userUUID string) (string, error) {
-	var schoolUUID string
-	err := s.routeRepository.GetSchoolUUIDByUserUUID(userUUID, &schoolUUID)
-	if err != nil {
-		return "", fmt.Errorf("error retrieving school UUID: %w", err)
-	}
-	return schoolUUID, nil
-}
-
-func (s *routeService) GetDriverUUIDByRouteName(routeNameUUID string) (string, error) {
-	driverUUID, err := s.routeRepository.GetDriverUUIDByRouteName(routeNameUUID)
-	if err != nil {
-		return "", fmt.Errorf("error retrieving driver UUID: %w", err)
-	}
-	return driverUUID, nil
-}
-
 func (service *routeService) UpdateRoute(route dto.RoutesRequestDTO, routenameUUID, schoolUUID, username string) error {
 	routeEntity := entity.Routes{
 		RouteNameUUID:    uuid.MustParse(routenameUUID),
@@ -231,13 +232,13 @@ func (service *routeService) UpdateRoute(route dto.RoutesRequestDTO, routenameUU
 	for _, assignment := range route.RouteAssignment {
 		for _, student := range assignment.Students {
 			routeAssignmentEntity := entity.RouteAssignment{
-				RouteUUID:    uuid.MustParse(routenameUUID),
-				DriverUUID:   assignment.DriverUUID,
-				StudentUUID:  student.StudentUUID,
-				StudentOrder: student.StudentOrder,
-				SchoolUUID:   uuid.MustParse(schoolUUID),
-				CreatedAt:    sql.NullTime{Time: time.Now(), Valid: true},
-				CreatedBy:    sql.NullString{String: username, Valid: true},
+				RouteUUID:     uuid.MustParse(routenameUUID),
+				DriverUUID:    assignment.DriverUUID,
+				StudentUUID:   student.StudentUUID,
+				StudentOrder:  student.StudentOrder,
+				SchoolUUID:    uuid.MustParse(schoolUUID),
+				CreatedAt:     sql.NullTime{Time: time.Now(), Valid: true},
+				CreatedBy:     sql.NullString{String: username, Valid: true},
 			}
 
 			err := service.routeRepository.UpdateRouteAssignment(tx, routeAssignmentEntity)
@@ -291,6 +292,30 @@ func (service *routeService) DeleteRoute(routenameUUID, schoolUUID, username str
 
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+func (s *routeService) GetDriverUUIDByRouteName(routeNameUUID string) (string, error) {
+	driverUUID, err := s.routeRepository.GetDriverUUIDByRouteName(routeNameUUID)
+	if err != nil {
+		return "", fmt.Errorf("error retrieving driver UUID: %w", err)
+	}
+	return driverUUID, nil
+}
+
+func ValidateDuplicateStudents(routeAssignments []dto.RouteAssignmentRequestDTO) error {
+	studentSet := make(map[string]bool)
+
+	for _, assignment := range routeAssignments {
+		for _, student := range assignment.Students {
+			if studentSet[student.StudentUUID.String()] {
+				// Kembalikan error dengan pesan relevan
+				return fmt.Errorf("same student not permitted")
+			}
+			studentSet[student.StudentUUID.String()] = true
+		}
 	}
 
 	return nil

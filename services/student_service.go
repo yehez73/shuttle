@@ -15,6 +15,7 @@ import (
 type StudentServiceInterface interface {
 	GetAllStudentsWithParents(page int, limit int, sortField string, sortDirection string, schoolUUIDStr string) ([]dto.SchoolStudentParentResponseDTO, int, error)
 	GetSpecStudentWithParents(id, schoolUUIDStr string) (dto.SchoolStudentParentResponseDTO, error)
+	GetAvailableStudents(schoolUUID string) ([]dto.StudentResponseDTO, error)
 	AddSchoolStudentWithParents(student dto.SchoolStudentParentRequestDTO, schoolUUID string, username string) error
 	UpdateSchoolStudentWithParents(id string, student dto.SchoolStudentParentRequestDTO, schoolUUID, username string) error
 	DeleteSchoolStudentWithParentsIfNeccessary(id, schoolUUID, username string) error
@@ -121,6 +122,28 @@ func (service *StudentService) GetSpecStudentWithParents(id, schoolUUIDStr strin
 		UpdatedAt:        safeTimeFormat(student.UpdatedAt),
 		UpdatedBy:        safeStringFormat(student.UpdatedBy),
 	}, nil
+}
+
+// pppp
+
+func (service *StudentService) GetAvailableStudents(schoolUUID string) ([]dto.StudentResponseDTO, error) {
+	students, err := service.studentRepository.FetchAvailableStudent(schoolUUID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Mengubah data siswa ke dalam format DTO
+	var studentDTOs []dto.StudentResponseDTO
+	for _, student := range students {
+		studentDTO := dto.StudentResponseDTO{
+			UUID:      student.UUID.String(),
+			FirstName: student.FirstName,
+			LastName:  student.LastName,
+		}
+		studentDTOs = append(studentDTOs, studentDTO)
+	}
+
+	return studentDTOs, nil
 }
 
 func (service *StudentService) AddSchoolStudentWithParents(student dto.SchoolStudentParentRequestDTO, schoolUUID string, username string) error {

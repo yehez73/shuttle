@@ -10,6 +10,7 @@ import (
 	"shuttle/models/dto"
 	"shuttle/services"
 	"shuttle/utils"
+	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -67,15 +68,68 @@ func (h *ShuttleHandler) GetAllShuttleByParent(c *fiber.Ctx) error {
         return utils.BadRequestResponse(c, "Invalid userUUID format", nil)
     }
     
-    // Debug log
-    fmt.Println("ParentUUID:", parentUUID)
+    // Ambil query parameter untuk pagination
+    page, err := strconv.Atoi(c.Query("page", "1"))
+    if err != nil || page < 1 {
+        return utils.BadRequestResponse(c, "Invalid page number", nil)
+    }
 
-    shuttles, err := h.ShuttleService.GetAllShuttleByParent(parentUUID)
+    limit, err := strconv.Atoi(c.Query("limit", "10"))
+    if err != nil || limit < 1 {
+        return utils.BadRequestResponse(c, "Invalid limit number", nil)
+    }
+
+    sortField := c.Query("sort_by", "created_at")
+    sortDirection := c.Query("direction", "asc")
+
+    if sortDirection != "asc" && sortDirection != "desc" {
+        return utils.BadRequestResponse(c, "Invalid sort direction, use 'asc' or 'desc'", nil)
+    }
+
+    // Panggil service untuk mendapatkan data dan total items
+    shuttles, totalItems, err := h.ShuttleService.GetAllShuttleByParent(parentUUID, page, limit, sortField, sortDirection)
     if err != nil {
         return utils.NotFoundResponse(c, "Shuttle data not found", nil)
     }
 
-    return c.Status(http.StatusOK).JSON(shuttles)
+    // Hitung total halaman
+    totalPages := (totalItems + limit - 1) / limit
+    if page > totalPages {
+        if totalItems > 0 {
+            return utils.BadRequestResponse(c, "Page number out of range", nil)
+        }
+        page = 1
+    }
+
+    // Hitung start dan end
+    start := (page-1)*limit + 1
+    if totalItems == 0 || start > totalItems {
+        start = 0
+    }
+
+    end := start + len(shuttles) - 1
+    if end > totalItems {
+        end = totalItems
+    }
+
+    if len(shuttles) == 0 {
+        start = 0
+        end = 0
+    }
+
+    // Response dengan metadata pagination
+    response := fiber.Map{
+        "data": shuttles,
+        "meta": fiber.Map{
+            "current_page":   page,
+            "total_pages":    totalPages,
+            "per_page_items": limit,
+            "total_items":    totalItems,
+            "showing":        fmt.Sprintf("Showing %d-%d of %d", start, end, totalItems),
+        },
+    }
+
+    return utils.SuccessResponse(c, "Shuttle data fetched successfully", response)
 }
 
 func (h *ShuttleHandler) GetAllShuttleByDriver(c *fiber.Ctx) error {
@@ -178,6 +232,7 @@ func (h *ShuttleHandler) AddShuttle(c *fiber.Ctx) error {
 
 func (h *ShuttleHandler) EditShuttle(c *fiber.Ctx) error {
 	id := c.Params("id")
+	
 	if id == "" {
 		return utils.BadRequestResponse(c, "Missing shuttleUUID in URL", nil)
 	}

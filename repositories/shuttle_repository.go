@@ -13,8 +13,9 @@ import (
 )
 
 type ShuttleRepositoryInterface interface {
+	CountShuttlesByParent(parentUUID uuid.UUID) (int, error)
 	FetchShuttleTrackByParent(parentUUID uuid.UUID) ([]dto.ShuttleResponse, error)
-	FetchAllShuttleByParent(parentUUID uuid.UUID) ([]dto.ShuttleAllResponse, error)
+	FetchAllShuttleByParent(offset, limit int, sortField, sortDirection string, parentUUID uuid.UUID) ([]dto.ShuttleAllResponse, error)
 	FetchAllShuttleByDriver(driverUUID uuid.UUID) ([]dto.ShuttleAllResponse, error)
 	GetSpecShuttle(shuttleUUID uuid.UUID) ([]dto.ShuttleSpecResponse, error)
 	SaveShuttle(shuttle entity.Shuttle) error
@@ -29,6 +30,23 @@ func NewShuttleRepository(DB *sqlx.DB) ShuttleRepositoryInterface {
 	return &ShuttleRepository{
 		DB: DB,
 	}
+}
+
+func (r *ShuttleRepository) CountShuttlesByParent(parentUUID uuid.UUID) (int, error) {
+    query := `
+    SELECT COUNT(*)
+    FROM shuttle st
+    LEFT JOIN students s ON st.student_uuid = s.student_uuid
+    WHERE s.parent_uuid = $1
+    `
+
+    var total int
+    err := r.DB.Get(&total, query, parentUUID)
+    if err != nil {
+        return 0, err
+    }
+
+    return total, nil
 }
 
 func (r *ShuttleRepository) FetchShuttleTrackByParent(parentUUID uuid.UUID) ([]dto.ShuttleResponse, error) {
@@ -64,35 +82,38 @@ func (r *ShuttleRepository) FetchShuttleTrackByParent(parentUUID uuid.UUID) ([]d
 	return shuttles, nil
 }
 
-func (r *ShuttleRepository) FetchAllShuttleByParent(parentUUID uuid.UUID) ([]dto.ShuttleAllResponse, error) {
-	query := `
-		SELECT
-			st.shuttle_uuid,
-			st.student_uuid,
-			st.status,
-			s.student_first_name,
-			s.student_last_name,
-			s.student_grade,
-			s.student_gender,
-			s.parent_uuid,
-			s.school_uuid,
-			sc.school_name,
-			st.created_at,
-			COALESCE(st.updated_at::TEXT, 'N/A') AS updated_at
-		FROM shuttle st
-		LEFT JOIN students s
-			ON st.student_uuid = s.student_uuid
-		LEFT JOIN schools sc 
-			ON s.school_uuid = sc.school_uuid
-		WHERE s.parent_uuid = $1 ORDER BY st.created_at ASC
-	`
-	var shuttles []dto.ShuttleAllResponse
-	err := r.DB.Select(&shuttles, query, parentUUID)
-	if err != nil {
-		return nil, err
-	}
+func (r *ShuttleRepository) FetchAllShuttleByParent(offset, limit int, sortField, sortDirection string, parentUUID uuid.UUID) ([]dto.ShuttleAllResponse, error) {
+    query := fmt.Sprintf(`
+        SELECT
+            st.shuttle_uuid,
+            st.student_uuid,
+            st.status,
+            s.student_first_name,
+            s.student_last_name,
+            s.student_grade,
+            s.student_gender,
+            s.parent_uuid,
+            s.school_uuid,
+            sc.school_name,
+            st.created_at,
+            COALESCE(st.updated_at::TEXT, 'N/A') AS updated_at
+        FROM shuttle st
+        LEFT JOIN students s
+            ON st.student_uuid = s.student_uuid
+        LEFT JOIN schools sc 
+            ON s.school_uuid = sc.school_uuid
+        WHERE s.parent_uuid = $1
+        ORDER BY %s %s
+        LIMIT $2 OFFSET $3
+    `, sortField, sortDirection)
 
-	return shuttles, nil
+    var shuttles []dto.ShuttleAllResponse
+    err := r.DB.Select(&shuttles, query, parentUUID, limit, offset)
+    if err != nil {
+        return nil, err
+    }
+
+    return shuttles, nil
 }
 
 func (r *ShuttleRepository) FetchAllShuttleByDriver(driverUUID uuid.UUID) ([]dto.ShuttleAllResponse, error) {
