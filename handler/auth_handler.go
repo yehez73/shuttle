@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"shuttle/errors"
 	"shuttle/logger"
 	"shuttle/models/dto"
 	"shuttle/services"
@@ -21,6 +22,7 @@ type AuthHandlerInterface interface {
 	IssueNewAccessToken(c *fiber.Ctx) error
 	AddDeviceToken(c *fiber.Ctx) error
 	ChangePassword(c *fiber.Ctx) error
+	ChangeProfilePicture(c *fiber.Ctx) error
 }
 
 type authHandler struct {
@@ -96,14 +98,14 @@ func (handler *authHandler) Logout(c *fiber.Ctx) error {
 	}
 
 	// Delete WebSocket connection if exists
-	// conn, exists := utils.GetConnection(userUUID)
-	// if exists {
-	// 	conn.Close()
-	// 	utils.RemoveConnection(userUUID)
-	// 	logger.LogInfo("WebSocket connection closed", map[string]interface{}{
-	// 		"user_uuid": userUUID,
-	// 	})
-	// }
+	conn, exists := utils.GetConnection(userUUID)
+	if exists {
+		conn.Close()
+		utils.RemoveConnection(userUUID)
+		logger.LogInfo("WebSocket connection closed", map[string]interface{}{
+			"user_uuid": userUUID,
+		})
+	}
 
 	err := handler.authService.DeleteRefreshTokenOnLogout(c.Context(), userUUID)
 	if err != nil {
@@ -190,6 +192,47 @@ func (handler *authHandler) UpdateMyProfile(c *fiber.Ctx) error {
 	}
 
 	return utils.SuccessResponse(c, "User profile updated", nil)
+}
+
+func (handler *authHandler) ChangeProfilePicture(c *fiber.Ctx) error {
+	userUUID, ok := c.Locals("userUUID").(string)
+	if !ok {
+		return utils.UnauthorizedResponse(c, "Token is invalid", nil)
+	}
+
+	roleCode, ok := c.Locals("role_code").(string)
+	if !ok {
+		return utils.UnauthorizedResponse(c, "Token is invalid", nil)
+	}
+
+	user, err := handler.userService.GetSpecUserWithDetails(userUUID)
+	if err != nil {
+		logger.LogError(err, "Failed to fetch user", nil)
+		return utils.NotFoundResponse(c, "User not found", nil)
+	}
+
+	detailsMap := make(map[string]interface{})
+	if err := json.Unmarshal(user.Details, &detailsMap); err != nil {
+		return utils.InternalServerErrorResponse(c, "Failed to parse user details", nil)
+	}
+	
+	picture, err := utils.HandleAssetsOnUpdate(c, detailsMap["Picture"].(string))
+	if err != nil {
+		if customErr, ok := err.(*errors.CustomError); ok {
+			return utils.ErrorResponse(c, customErr.StatusCode, strings.ToUpper(string(customErr.Message[0]))+customErr.Message[1:], nil)
+		}
+		return err
+	}
+
+	err = handler.userService.UpdateUserPicture(userUUID, roleCode, picture)
+	if err != nil {
+		logger.LogError(err, "Failed to update user picture", map[string]interface{}{
+			"user_uuid": userUUID,
+		})
+		return utils.InternalServerErrorResponse(c, "Something went wrong, please try again later", nil)
+	}
+
+	return utils.SuccessResponse(c, "Profile picture updated", nil)
 }
 
 func (handler *authHandler) ChangePassword(c *fiber.Ctx) error {

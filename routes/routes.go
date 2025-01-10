@@ -64,6 +64,7 @@ func Route(r *fiber.App, db *sqlx.DB) {
 
 	protected.Get("/my/profile", authHandler.GetMyProfile)
 	protected.Put("/my/profile/update", authHandler.UpdateMyProfile)
+	protected.Patch("/my/profile/picture", authHandler.ChangeProfilePicture)
 
 	protected.Patch("/change-password", authHandler.ChangePassword)
 

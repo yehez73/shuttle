@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"shuttle/logger"
+	"shuttle/errors"
 
 	"github.com/disintegration/imaging"
 	"github.com/gofiber/fiber/v2"
@@ -21,34 +21,34 @@ func HandleUploadedFile(c *fiber.Ctx) (string, error) {
 	file, err := c.FormFile("picture")
 	if err != nil {
 		logger.LogError(err, "Failed to get file", nil)
-		return "", BadRequestResponse(c, "Picture is required", nil)
+		return "", errors.New("picture is required", 400)
 	}
 
 	if !IsValidImageExtension(file.Filename) {
-		return "", BadRequestResponse(c, "Invalid image file extension", nil)
+		return "", errors.New("invalid image file extension", 400)
 	}
 
 	src, err := file.Open()
 	if err != nil {
 		logger.LogError(err, "Failed to open file", nil)
-		return "", ErrorResponse(c, http.StatusInternalServerError, "Something went wrong, please try again later", nil)
+		return "", errors.New("something went wrong, please try again later", 500)
 	}
 	defer src.Close()
 
 	fileBytes, err := io.ReadAll(src)
 	if err != nil {
 		logger.LogError(err, "Failed to read file", nil)
-		return "", ErrorResponse(c, http.StatusInternalServerError, "Something went wrong, please try again later", nil)
+		return "", errors.New("something went wrong, please try again later", 500)
 	}
 
 	if !IsValidImageType(fileBytes) {
-		return "", BadRequestResponse(c, "Invalid image file type", nil)
+		return "", errors.New("invalid image file type", 400)
 	}
 
 	pictureFileName, err := SavePicture(fileBytes, file.Filename)
 	if err != nil {
 		logger.LogError(err, "Failed to save picture", nil)
-		return "", ErrorResponse(c, http.StatusInternalServerError, "Something went wrong, please try again later", nil)
+		return "", errors.New("something went wrong, please try again later", 500)
 	}
 	
 	return pictureFileName, nil

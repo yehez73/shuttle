@@ -36,6 +36,7 @@ type UserServiceInterface interface {
 
 	AddUser(req dto.UserRequestsDTO, user_name string) (uuid.UUID, error)
 	UpdateUser(id string, user dto.UserRequestsDTO, user_name string, file []byte) error
+	UpdateUserPicture(userUUID, roleCode, picture string) error
 
 	DeleteSuperAdmin(id string, user_name string) error
 	DeleteSchoolAdmin(id string, user_name string) error
@@ -590,6 +591,44 @@ func (s *UserService) UpdateUser(id string, req dto.UserRequestsDTO, username st
 	if err := s.updateRoleDetails(tx, req, id); err != nil {
 		logger.LogError(err, "error updating role details", map[string]interface{}{})
 		return fmt.Errorf("error updating role details: %w", err)
+	}
+
+	return nil
+}
+
+func (service *UserService) UpdateUserPicture(userUUID, roleCode, picture string) error {
+	safeUUID, err := uuid.Parse(userUUID)
+	if err != nil {
+		return errors.New("invalid user id", 400)
+	}
+
+	switch roleCode {
+	case "SA":
+		err = service.userRepository.UpdateUserPicture(safeUUID, picture, "super_admin_details")
+		if err != nil {
+			return err
+		}
+
+	case "AS":
+		err = service.userRepository.UpdateUserPicture(safeUUID, picture, "school_admin_details")
+		if err != nil {
+			return err
+		}
+
+	case "P":
+		err = service.userRepository.UpdateUserPicture(safeUUID, picture, "parent_details")
+		if err != nil {
+			return err
+		}
+
+	case "D":
+		err = service.userRepository.UpdateUserPicture(safeUUID, picture, "driver_details")
+		if err != nil {
+			return err
+		}
+
+	default:
+		return errors.New("invalid role code", 400)
 	}
 
 	return nil

@@ -3,8 +3,6 @@ package utils
 import (
 	"encoding/json"
 	"sync"
-	"time"
-
 	// "time"
 
 	"shuttle/logger"
@@ -27,6 +25,30 @@ func NewWebSocketService(userRepository repositories.UserRepositoryInterface, au
 		userRepository: userRepository,
 		authRepository: authRepository,
 	}
+}
+
+var (
+	activeConnections = make(map[string]*websocket.Conn) // Save active WebSocket connections
+	mutex             = &sync.Mutex{}                    // Ensure atomic operations
+)
+
+func AddConnection(ID string, conn *websocket.Conn) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	activeConnections[ID] = conn
+}
+
+func RemoveConnection(ID string) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	delete(activeConnections, ID)
+}
+
+func GetConnection(ID string) (*websocket.Conn, bool) {
+	mutex.Lock()
+	defer mutex.Unlock()
+	conn, exists := activeConnections[ID]
+	return conn, exists
 }
 
 // Handle WebSocket connection
@@ -81,19 +103,10 @@ func (s *WebSocketService) HandleWebSocketConnection(c *websocket.Conn) {
 	// 	return
 	// }
 
-	err := s.authRepository.UpdateUserStatus(userUUID, "online", time.Time{})
-	if err != nil {
-		logger.LogError(err, "Websocket Error Updating User Status", nil)
-	}
-	
 	AddToShuttleGroup(shuttleUUID, userUUID, c)
 	defer func() {
 		RemoveFromShuttleGroup(shuttleUUID, userUUID)
 		logger.LogInfo("WebSocket Connection Removed from Group", map[string]interface{}{"ShuttleUUID": shuttleUUID, "UserUUID": userUUID})
-		err = s.authRepository.UpdateUserStatus(userUUID, "offline", time.Now())
-		if err != nil {
-			logger.LogError(err, "Websocket Error Updating User Status", nil)
-		}
 	}()
 
 	logger.LogInfo("WebSocket Connection Added to Group", map[string]interface{}{"ShuttleUUID": shuttleUUID, "UserUUID": userUUID})
