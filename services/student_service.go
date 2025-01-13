@@ -13,6 +13,7 @@ import (
 )
 
 type StudentServiceInterface interface {
+	GetStudentCountByMonth() (map[string]int, error)
 	GetAllStudentsWithParents(page int, limit int, sortField string, sortDirection string, schoolUUIDStr string) ([]dto.SchoolStudentParentResponseDTO, int, error)
 	GetSpecStudentWithParents(id, schoolUUIDStr string) (dto.SchoolStudentParentResponseDTO, error)
 	GetAvailableStudents(schoolUUID string) ([]dto.StudentResponseDTO, error)
@@ -33,6 +34,25 @@ func NewStudentService(studentRepository repositories.StudentRepositoryInterface
 		studentRepository: studentRepository,
 		userRepository:    userRepository,
 	}
+}
+
+func (service *StudentService) GetStudentCountByMonth() (map[string]int, error) {
+	// Memanggil repository untuk mendapatkan jumlah siswa per bulan
+	studentCountByMonth, err := service.studentRepository.CountStudentsGroupedByMonth()
+	if err != nil {
+		return nil, err
+	}
+	// Inisialisasi map dengan semua bulan bernilai 0
+	studentCount := map[string]int{
+		"jan": 0, "feb": 0, "mar": 0, "apr": 0, "may": 0,
+		"jun": 0, "jul": 0, "aug": 0, "sep": 0, "okt": 0,
+		"nov": 0, "dec": 0,
+	}
+	// Mengisi map berdasarkan hasil repository
+	for month, total := range studentCountByMonth {
+		studentCount[month] = total
+	}
+	return studentCount, nil
 }
 
 func (service *StudentService) GetAllStudentsWithParents(page int, limit int, sortField string, sortDirection string, schoolUUIDStr string) ([]dto.SchoolStudentParentResponseDTO, int, error) {

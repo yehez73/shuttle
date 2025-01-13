@@ -103,10 +103,15 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	
 	// VEHICLE FOR SUPERADMIN
 	protectedSuperAdmin.Get("/vehicle/all", vehicleHandler.GetAllVehicles)
+	protectedSuperAdmin.Get("/vehicle/free/all", vehicleHandler.GetAvailableVehicles)
 	protectedSuperAdmin.Get("/vehicle/:id", vehicleHandler.GetSpecVehicle)
 	protectedSuperAdmin.Post("/vehicle/add", vehicleHandler.AddVehicle)
 	protectedSuperAdmin.Put("/vehicle/update/:id", vehicleHandler.UpdateVehicle)
 	protectedSuperAdmin.Delete("/vehicle/delete/:id", vehicleHandler.DeleteVehicle)
+
+	
+	protectedSuperAdmin.Get("/shuttle/summary", shuttleHandler.GetShuttleSummary)
+	protectedSuperAdmin.Get("/student/growth", studentHandler.GetStudentCountByMonth)
 
 
 	////////////////////////////////////// SCHOOL ADMIN //////////////////////////////////////
@@ -130,7 +135,7 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	
 	protectedSchoolAdmin.Get("/vehicle/all", vehicleHandler.GetAllVehiclesForPermittedSchool)
 	protectedSchoolAdmin.Get("/vehicle/:id", vehicleHandler.GetSpecVehicleForPermittedSchool)
-	protectedSchoolAdmin.Post("/vehicle/add", vehicleHandler.AddVehicleWithDriverForPermittedSchool)
+	protectedSchoolAdmin.Post("/vehicle/add", vehicleHandler.AddVehicleForPermittedSchool)
 	protectedSchoolAdmin.Put("/vehicle/update/:id", vehicleHandler.UpdateVehicle)
 	protectedSchoolAdmin.Delete("/vehicle/delete/:id", vehicleHandler.DeleteVehicle)
 
