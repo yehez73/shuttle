@@ -40,7 +40,7 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	childernHandler := handler.NewChildernHandler(childernService)
 	shuttleHandler := handler.NewShuttleHandler(shuttleService)
 
-	wsService := utils.NewWebSocketService(userRepository, authRepository)
+	wsService := utils.NewWebSocketService(userRepository, authRepository, shuttleRepository)
 	
 	////////////////////////////////////// PUBLIC //////////////////////////////////////
 
@@ -48,19 +48,19 @@ func Route(r *fiber.App, db *sqlx.DB) {
 	r.Post("/refresh-token", authHandler.IssueNewAccessToken)
 	r.Static("/assets", "./assets")
 
-	r.Use("/ws", func(c *fiber.Ctx) error {
-		if websocket.IsWebSocketUpgrade(c) {
-			return c.Next()
-		}
-		return fiber.ErrUpgradeRequired
-	})
-	r.Get("/ws/:id", websocket.New(wsService.HandleWebSocketConnection))
-
 	////////////////////////////////////// AUTHENTICATED //////////////////////////////////////
 
 	protected := r.Group("/api")
 	protected.Use(middleware.AuthenticationMiddleware())
 	protected.Use(middleware.AuthorizationMiddleware([]string{"SA", "AS", "D", "P"}))
+
+	protected.Use("/ws", func(c *fiber.Ctx) error {
+		if websocket.IsWebSocketUpgrade(c) {
+			return c.Next()
+		}
+		return fiber.ErrUpgradeRequired
+	})
+	protected.Get("/ws/:id", websocket.New(wsService.HandleWebSocketConnection))
 
 	protected.Get("/my/profile", authHandler.GetMyProfile)
 	protected.Put("/my/profile/update", authHandler.UpdateMyProfile)

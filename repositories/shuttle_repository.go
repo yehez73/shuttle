@@ -16,6 +16,8 @@ type ShuttleRepositoryInterface interface {
 	CountShuttleCurrentTime() (int, error)
 	CountShuttlesByParent(parentUUID uuid.UUID) (int, error)
 	CountShuttleByDate(date string) (int, error)
+	CheckIfExistInShuttle(userUUID uuid.UUID, shuttleUUID uuid.UUID) (bool, error)
+
 	FetchShuttleTrackByParent(parentUUID uuid.UUID) ([]dto.ShuttleResponse, error)
 	FetchAllShuttleByParent(offset, limit int, sortField, sortDirection string, parentUUID uuid.UUID) ([]dto.ShuttleAllResponse, error)
 	FetchAllShuttleByDriver(driverUUID uuid.UUID) ([]dto.ShuttleAllResponse, error)
@@ -83,6 +85,29 @@ func (r *ShuttleRepository) CountShuttleByDate(date string) (int, error) {
 	}
 
 	return total, nil
+}
+
+func (r *ShuttleRepository) CheckIfExistInShuttle(userUUID uuid.UUID, shuttleUUID uuid.UUID) (bool, error) {
+	query := `
+		SELECT 1
+		FROM shuttle st
+		LEFT JOIN students s
+			ON st.student_uuid = s.student_uuid
+		LEFT JOIN users pd
+			ON s.parent_uuid = pd.user_uuid
+		WHERE (st.driver_uuid = $1 OR s.parent_uuid = $1) AND st.shuttle_uuid = $2
+	`
+
+	var exists int
+	err := r.DB.Get(&exists, query, userUUID, shuttleUUID)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return true, nil
 }
 
 func (r *ShuttleRepository) FetchShuttleTrackByParent(parentUUID uuid.UUID) ([]dto.ShuttleResponse, error) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"shuttle/models/entity"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
@@ -46,6 +47,7 @@ type UserRepositoryInterface interface {
 
 	UpdateUser(tx *sqlx.Tx, user entity.User, userUUID string) error
 	UpdateUserPicture(userUUID uuid.UUID, picture, db string) error
+	UpdateUserStatus(userUUID uuid.UUID, status string, time time.Time) error
 	UpdateSuperAdminDetails(tx *sqlx.Tx, details entity.SuperAdminDetails, userUUID string) error
 	UpdateSchoolAdminDetails(tx *sqlx.Tx, details entity.SchoolAdminDetails, userUUID string) error
 	UpdateParentDetails(tx *sqlx.Tx, details entity.ParentDetails, userUUID string) error
@@ -1001,6 +1003,25 @@ func (r *userRepository) UpdateDriverDetails(tx *sqlx.Tx, details entity.DriverD
 func (r *userRepository) UpdateUserPicture(userUUID uuid.UUID, picture, dbName string) error {
 	query := fmt.Sprintf(`UPDATE %s SET user_picture = $1 WHERE user_uuid = $2`, dbName)
 	res, err := r.DB.Exec(query, picture, userUUID)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("no rows affected")
+	}
+
+	return nil
+}
+
+func (r *userRepository) UpdateUserStatus(userUUID uuid.UUID, status string, time time.Time) error {
+	query := `UPDATE users SET user_status = $1, user_last_active = $2 WHERE user_uuid = $3`
+	res, err := r.DB.Exec(query, status, time, userUUID)
 	if err != nil {
 		return err
 	}
